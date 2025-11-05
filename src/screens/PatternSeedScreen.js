@@ -202,7 +202,7 @@ export const PatternSeedScreen = ({ route, navigation }) => {
           colors={[COLORS.card, COLORS.surface]}
           style={styles.imageGradientBg}
         >
-          <View style={styles.imageContainer}>
+          <View style={[styles.imageContainer, view3D && styles.imageContainer3D]}>
             {loading ? (
               <ActivityIndicator size="large" color={COLORS.primary} />
             ) : view3D && selectedSeed ? (
@@ -369,6 +369,9 @@ const styles = StyleSheet.create({
     height: 250,
     justifyContent: "center",
     alignItems: "center",
+  },
+  imageContainer3D: {
+    height: 400,
   },
   image: {
     width: "100%",

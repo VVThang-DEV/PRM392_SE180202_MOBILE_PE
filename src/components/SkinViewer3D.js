@@ -56,7 +56,7 @@ export const SkinViewer3D = ({ url, onError }) => {
     console.log("URL exists:", !!url);
     console.log("URL type:", typeof url);
     console.log("URL length:", url?.length || 0);
-    console.log("First 100 chars:", url?.substring(0, 100));
+    console.log("URL preview:", url?.substring(0, 200));
 
     // Return HTML directly if it's not a data URL
     if (url && !url.startsWith("data:text/html")) {
@@ -70,7 +70,7 @@ export const SkinViewer3D = ({ url, onError }) => {
         const base64Content = url.split(",")[1];
         if (base64Content) {
           const decoded = decodeURIComponent(escape(atob(base64Content)));
-          console.log("✓ Decoded HTML from base64");
+          console.log("✓ Decoded HTML from base64, length:", decoded.length);
           return decoded;
         }
       } catch (error) {
@@ -116,6 +116,7 @@ export const SkinViewer3D = ({ url, onError }) => {
           <div class="debug">
             <div>URL provided: ${!!url ? "Yes" : "No"}</div>
             <div>URL length: ${url?.length || 0}</div>
+            <div>URL starts with data: ${url?.startsWith("data:")}</div>
           </div>
         </body>
       </html>
@@ -142,6 +143,16 @@ export const SkinViewer3D = ({ url, onError }) => {
     );
   }
 
+  const htmlContent = getHtmlContent();
+  console.log("=== WebView Source ===");
+  console.log("HTML content length:", htmlContent.length);
+  console.log("HTML preview:", htmlContent.substring(0, 200));
+
+  // Encode HTML as base64 data URI
+  const base64Html = btoa(unescape(encodeURIComponent(htmlContent)));
+  const dataUri = `data:text/html;base64,${base64Html}`;
+  console.log("Data URI created, length:", dataUri.length);
+
   return (
     <View style={styles.container}>
       {loading && (
@@ -152,8 +163,7 @@ export const SkinViewer3D = ({ url, onError }) => {
       )}
       <WebView
         source={{
-          html: getHtmlContent(),
-          baseUrl: "",
+          uri: dataUri,
         }}
         style={styles.webview}
         onLoadEnd={handleLoadEnd}
@@ -197,7 +207,6 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.lg,
     overflow: "hidden",
     backgroundColor: "#0a0e14",
-    minHeight: 400,
   },
   webview: {
     flex: 1,

@@ -36,7 +36,7 @@ const ListStack = () => {
         name="ListHome"
         component={ListScreen}
         options={{
-          title: "SE1720 - YourName - SE######",
+          title: "SE1720 - Vo Viet Thang - SE180202",
           headerLargeTitle: false,
         }}
       />
