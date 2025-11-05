@@ -1,27 +1,50 @@
-const API_BASE_URL = "https://bymykel.com/CSGO-API/api/en";
+const API_BASE_URL = "https://bymykel.github.io/CSGO-API/api/en";
 
 /**
  * Fetches CS:GO skins data from the public API
- * @returns {Promise<Array>} Array of skin objects
+ * @returns {Promise<Array>} Array of skin objects with proper structure
  */
 export const fetchSkinsFromAPI = async () => {
   try {
     console.log("Fetching skins from API...");
-    const response = await fetch(`${API_BASE_URL}/skins.json`);
+    const endpoints = [
+      `${API_BASE_URL}/skins.json`,
+      "https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/skins.json",
+    ];
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    let lastError;
+    for (const endpoint of endpoints) {
+      try {
+        console.log(`Trying endpoint: ${endpoint}`);
+        const response = await fetch(endpoint);
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log(`Successfully fetched ${data.length} skins from API`);
+
+        // Log first item to debug structure
+        if (data.length > 0) {
+          console.log("Sample skin data:", JSON.stringify(data[0], null, 2));
+        }
+
+        // Return raw API data - let DataContext handle categorization
+        return data;
+      } catch (error) {
+        console.log(`Failed to fetch from ${endpoint}:`, error.message);
+        lastError = error;
+      }
     }
 
-    const data = await response.json();
-    console.log(`Fetched ${data.length} skins from API`);
-    return data;
+    console.error("All API endpoints failed. Last error:", lastError);
+    throw lastError;
   } catch (error) {
     console.error("Error fetching skins from API:", error);
     throw error;
   }
 };
-
 /**
  * Syncs API data to RealmDB
  * @param {Realm} realm - Realm database instance
@@ -139,7 +162,13 @@ export const determineCategory = (weaponName) => {
     return "Shotgun";
   } else if (name.includes("m249") || name.includes("negev")) {
     return "Machine Gun";
-  } else if (name.includes("gloves") || name.includes("glove")) {
+  } else if (
+    name.includes("gloves") ||
+    name.includes("glove") ||
+    name.includes("wraps") ||
+    name.includes("hand wraps") ||
+    name.includes("handwraps")
+  ) {
     return "Gloves";
   } else {
     return "Other";

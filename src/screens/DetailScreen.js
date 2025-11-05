@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -18,6 +18,12 @@ import Animated, {
 import * as Haptics from "expo-haptics";
 import { useData } from "../context/DataContext";
 import {
+  getSkinPrice,
+  formatPrice,
+  getPriceRange,
+  getAllWearPrices,
+} from "../services/priceService";
+import {
   COLORS,
   SPACING,
   BORDER_RADIUS,
@@ -29,10 +35,45 @@ const { width } = Dimensions.get("window");
 
 export const DetailScreen = ({ route, navigation }) => {
   const { itemId } = route.params;
-  const { items, isFavorite, toggleFavorite } = useData();
+  const { items, isFavorite, toggleFavorite, priceData } = useData();
 
   const item = items.find((i) => i._id === itemId);
   const isItemFavorite = isFavorite(itemId);
+
+  const [showPriceDetails, setShowPriceDetails] = useState(false);
+
+  // Calculate base price for the item
+  const basePrice = priceData
+    ? getSkinPrice(priceData, item?.name, null, item?.stattrak, item?.souvenir)
+    : null; // Debug price data
+  useEffect(() => {
+    console.log("=== DetailScreen Price Debug ===");
+    console.log("Item name:", item?.name);
+    console.log("StatTrak:", item?.stattrak);
+    console.log("Souvenir:", item?.souvenir);
+    console.log("priceData loaded:", !!priceData);
+    if (priceData) {
+      console.log("Total price entries:", Object.keys(priceData).length);
+      console.log("Sample keys:", Object.keys(priceData).slice(0, 5));
+
+      if (item?.name) {
+        // Try to find exact match
+        const exactMatch = priceData[item.name];
+        console.log("Exact match for '" + item.name + "':", !!exactMatch);
+
+        // Try to find partial matches
+        const weapon = item.name.split("|")[0]?.trim() || "";
+        const partialMatches = Object.keys(priceData).filter((k) =>
+          k.includes(weapon)
+        );
+        console.log(
+          "Partial matches for '" + weapon + "':",
+          partialMatches.slice(0, 3)
+        );
+      }
+    }
+    console.log("=================");
+  }, [priceData, item]);
 
   // Animation for favorite button
   const scale = useSharedValue(1);
@@ -81,7 +122,9 @@ export const DetailScreen = ({ route, navigation }) => {
         />
 
         {/* Favorite Button */}
-        <Animated.View style={[animatedButtonStyle]}>
+        <Animated.View
+          style={[styles.favoriteButtonWrapper, animatedButtonStyle]}
+        >
           <TouchableOpacity
             style={styles.favoriteButton}
             onPress={handleToggleFavorite}
@@ -98,21 +141,200 @@ export const DetailScreen = ({ route, navigation }) => {
 
       {/* Content */}
       <View style={styles.content}>
-        {/* Category Badge */}
-        <View style={styles.categoryBadge}>
-          <Text style={styles.categoryText}>{item.category}</Text>
+        {/* Badges Row */}
+        <View style={styles.badgesRow}>
+          {/* Category Badge */}
+          <View style={styles.categoryBadge}>
+            <Text style={styles.categoryText}>
+              {item.categoryName || item.category}
+            </Text>
+          </View>
+
+          {/* StatTrak Badge */}
+          {item.stattrak && (
+            <View style={[styles.categoryBadge, styles.stattrakBadge]}>
+              <Text style={styles.categoryText}>StatTrak™</Text>
+            </View>
+          )}
+
+          {/* Souvenir Badge */}
+          {item.souvenir && (
+            <View style={[styles.categoryBadge, styles.souvenirBadge]}>
+              <Text style={styles.categoryText}>Souvenir</Text>
+            </View>
+          )}
+
+          {/* Spacer to push price to the right */}
+          <View style={{ flex: 1 }} />
+
+          {/* Price Badge */}
+          {basePrice && (
+            <View style={[styles.categoryBadge, styles.priceBadge]}>
+              <Ionicons name="cash" size={14} color={COLORS.success} />
+              <Text style={[styles.categoryText, styles.priceText]}>
+                {formatPrice(basePrice.avg)}
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Weapon Name */}
-        {item.weapon && <Text style={styles.weapon}>{item.weapon}</Text>}
+        {item.weaponName && (
+          <Text style={styles.weapon}>{item.weaponName}</Text>
+        )}
 
         {/* Skin Name */}
         <Text style={styles.name}>{item.name}</Text>
 
         {/* Description */}
         {item.description && (
-          <Text style={styles.description}>{item.description}</Text>
+          <Text style={styles.description}>
+            {item.description
+              .replace(/\\n/g, "\n")
+              .replace(/<i>/g, "")
+              .replace(/<\/i>/g, "")
+              .replace(/<br>/g, "\n")
+              .replace(/<br\/>/g, "\n")}
+          </Text>
         )}
+
+        {/* Price Details Toggle */}
+        {basePrice && (
+          <TouchableOpacity
+            style={styles.priceToggleButton}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setShowPriceDetails(!showPriceDetails);
+            }}
+          >
+            <View style={styles.priceToggleHeader}>
+              <Ionicons name="cash-outline" size={20} color={COLORS.primary} />
+              <Text style={styles.priceToggleText}>Price Details</Text>
+              <Ionicons
+                name={showPriceDetails ? "chevron-up" : "chevron-down"}
+                size={20}
+                color={COLORS.textSecondary}
+              />
+            </View>
+          </TouchableOpacity>
+        )}
+
+        {/* Price Details List */}
+        {showPriceDetails && priceData && (
+          <View style={styles.priceDetailsList}>
+            {getAllWearPrices(
+              priceData,
+              item.name,
+              item.stattrak,
+              item.souvenir
+            ).map((wearPrice, index) => (
+              <View key={wearPrice.wear} style={styles.priceDetailRow}>
+                <View style={styles.wearLabelContainer}>
+                  <View
+                    style={[
+                      styles.wearDot,
+                      {
+                        backgroundColor:
+                          wearPrice.wear === "Factory New"
+                            ? "#4CAF50"
+                            : wearPrice.wear === "Minimal Wear"
+                            ? "#8BC34A"
+                            : wearPrice.wear === "Field-Tested"
+                            ? "#FFC107"
+                            : wearPrice.wear === "Well-Worn"
+                            ? "#FF9800"
+                            : "#F44336",
+                      },
+                    ]}
+                  />
+                  <Text style={styles.wearLabel}>{wearPrice.wear}</Text>
+                </View>
+                <Text style={styles.wearPrice}>
+                  {formatPrice(wearPrice.price)}
+                </Text>
+              </View>
+            ))}
+            {getAllWearPrices(
+              priceData,
+              item.name,
+              item.stattrak,
+              item.souvenir
+            ).length === 0 && (
+              <Text style={styles.noPriceText}>No market prices available</Text>
+            )}
+          </View>
+        )}
+
+        {/* Action Buttons */}
+        <View style={styles.actionButtons}>
+          {/* Wear Condition Button */}
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => {
+              console.log("Navigating to WearCondition with:", {
+                skinId: item.id || item._id,
+                skinName: item.name,
+                fullItem: item,
+              });
+              navigation.navigate("WearCondition", {
+                skinId: item.id || item._id,
+                skinName: item.name,
+              });
+            }}
+            activeOpacity={0.8}
+          >
+            <View style={styles.actionButtonContent}>
+              <Ionicons name="eye-outline" size={24} color={COLORS.primary} />
+              <View style={styles.actionButtonText}>
+                <Text style={styles.actionButtonTitle}>Wear Conditions</Text>
+                <Text style={styles.actionButtonSubtitle}>
+                  Different wear levels
+                </Text>
+              </View>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={24}
+              color={COLORS.textMuted}
+            />
+          </TouchableOpacity>
+
+          {/* Pattern Seeds Button */}
+          {item.patternName && (
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                navigation.navigate("PatternSeed", {
+                  skinId: item.id || item._id,
+                  skinName: item.name,
+                  patternName: item.patternName,
+                  skinImage: item.image,
+                });
+              }}
+              activeOpacity={0.8}
+            >
+              <View style={styles.actionButtonContent}>
+                <Ionicons
+                  name="git-network-outline"
+                  size={24}
+                  color={COLORS.accent}
+                />
+                <View style={styles.actionButtonText}>
+                  <Text style={styles.actionButtonTitle}>Pattern Seeds</Text>
+                  <Text style={styles.actionButtonSubtitle}>
+                    Explore pattern variations
+                  </Text>
+                </View>
+              </View>
+              <Ionicons
+                name="chevron-forward"
+                size={24}
+                color={COLORS.textMuted}
+              />
+            </TouchableOpacity>
+          )}
+        </View>
 
         {/* Info Cards */}
         <View style={styles.infoSection}>
@@ -133,13 +355,57 @@ export const DetailScreen = ({ route, navigation }) => {
           )}
 
           {/* Pattern Card */}
-          {item.pattern && (
+          {item.patternName && (
             <View style={styles.infoCard}>
               <Text style={styles.infoLabel}>Pattern</Text>
-              <Text style={styles.infoValue}>{item.pattern}</Text>
+              <Text style={styles.infoValue}>{item.patternName}</Text>
             </View>
           )}
         </View>
+
+        {/* Crates Section */}
+        {item.crateNames && item.crateNames.length > 0 && (
+          <View style={styles.listSection}>
+            <Text style={styles.sectionTitle}>
+              <Ionicons name="cube-outline" size={18} color={COLORS.primary} />{" "}
+              Available in Crates
+            </Text>
+            <View style={styles.listContainer}>
+              {item.crateNames.map((crate, index) => (
+                <View key={index} style={styles.listItem}>
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={16}
+                    color={COLORS.primary}
+                  />
+                  <Text style={styles.listItemText}>{crate}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Collections Section */}
+        {item.collectionNames && item.collectionNames.length > 0 && (
+          <View style={styles.listSection}>
+            <Text style={styles.sectionTitle}>
+              <Ionicons name="albums-outline" size={18} color={COLORS.accent} />{" "}
+              Collections
+            </Text>
+            <View style={styles.listContainer}>
+              {item.collectionNames.map((collection, index) => (
+                <View key={index} style={styles.listItem}>
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={16}
+                    color={COLORS.accent}
+                  />
+                  <Text style={styles.listItemText}>{collection}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
 
         {/* Float Values */}
         {(item.min_float !== 0 || item.max_float !== 1) && (
@@ -204,14 +470,19 @@ const styles = StyleSheet.create({
     width: width,
     height: 300,
   },
-  favoriteButton: {
+  favoriteButtonWrapper: {
     position: "absolute",
-    top: SPACING.md,
-    right: SPACING.md,
-    backgroundColor: COLORS.overlay,
+    top: SPACING.lg,
+    right: SPACING.lg,
+    zIndex: 10,
+  },
+  favoriteButton: {
+    backgroundColor: COLORS.surface + "F5",
     borderRadius: BORDER_RADIUS.full,
     padding: SPACING.md,
-    ...SHADOWS.medium,
+    ...SHADOWS.large,
+    borderWidth: 2,
+    borderColor: COLORS.border + "60",
   },
   content: {
     padding: SPACING.lg,
@@ -221,13 +492,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
     borderRadius: BORDER_RADIUS.full,
-    alignSelf: "flex-start",
-    marginBottom: SPACING.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.xs / 2,
   },
   categoryText: {
     ...TYPOGRAPHY.bodySecondary,
     color: COLORS.text,
     fontWeight: "600",
+  },
+  priceBadge: {
+    backgroundColor: COLORS.success + "20",
+    borderWidth: 1,
+    borderColor: COLORS.success,
+  },
+  priceText: {
+    color: COLORS.success,
   },
   weapon: {
     ...TYPOGRAPHY.bodySecondary,
@@ -246,6 +526,41 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     marginBottom: SPACING.lg,
   },
+  actionButtons: {
+    gap: SPACING.sm,
+    marginBottom: SPACING.lg,
+  },
+  actionButton: {
+    backgroundColor: COLORS.card,
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    ...SHADOWS.small,
+  },
+  actionButtonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    gap: SPACING.md,
+  },
+  actionButtonText: {
+    flex: 1,
+  },
+  actionButtonTitle: {
+    ...TYPOGRAPHY.body,
+    fontWeight: "600",
+    color: COLORS.text,
+    marginBottom: SPACING.xs / 2,
+  },
+  actionButtonSubtitle: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.textMuted,
+    fontSize: 11,
+  },
   infoSection: {
     flexDirection: "row",
     gap: SPACING.md,
@@ -258,6 +573,30 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.lg,
     borderWidth: 1,
     borderColor: COLORS.border,
+  },
+  priceHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.xs,
+    marginBottom: SPACING.sm,
+  },
+  priceContent: {
+    alignItems: "flex-start",
+  },
+  priceValue: {
+    ...TYPOGRAPHY.h2,
+    color: COLORS.success,
+    fontWeight: "700",
+    marginBottom: SPACING.xs / 2,
+  },
+  priceRange: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.textMuted,
+  },
+  priceUnavailable: {
+    ...TYPOGRAPHY.body,
+    color: COLORS.textMuted,
+    fontStyle: "italic",
   },
   infoLabel: {
     ...TYPOGRAPHY.caption,
@@ -288,13 +627,6 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     marginBottom: SPACING.lg,
   },
-  sectionTitle: {
-    ...TYPOGRAPHY.caption,
-    color: COLORS.textMuted,
-    marginBottom: SPACING.md,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
   floatContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -324,5 +656,108 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.lg,
     borderWidth: 1,
     borderColor: COLORS.border,
+  },
+  badgesRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: SPACING.sm,
+    marginBottom: SPACING.md,
+  },
+  stattrakBadge: {
+    backgroundColor: COLORS.primary,
+  },
+  souvenirBadge: {
+    backgroundColor: COLORS.accent,
+  },
+  listSection: {
+    marginBottom: SPACING.lg,
+  },
+  sectionTitle: {
+    ...TYPOGRAPHY.h3,
+    marginBottom: SPACING.md,
+    color: COLORS.text,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  listContainer: {
+    backgroundColor: COLORS.card,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    overflow: "hidden",
+  },
+  listItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: SPACING.md,
+    gap: SPACING.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  listItemText: {
+    ...TYPOGRAPHY.body,
+    color: COLORS.text,
+    flex: 1,
+  },
+  priceToggleButton: {
+    backgroundColor: COLORS.card,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: SPACING.md,
+    overflow: "hidden",
+  },
+  priceToggleHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: SPACING.md,
+    gap: SPACING.sm,
+  },
+  priceToggleText: {
+    ...TYPOGRAPHY.body,
+    fontWeight: "600",
+    color: COLORS.text,
+    flex: 1,
+  },
+  priceDetailsList: {
+    backgroundColor: COLORS.card,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: SPACING.md,
+    overflow: "hidden",
+  },
+  priceDetailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: SPACING.md,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  wearLabelContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.sm,
+  },
+  wearDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  wearLabel: {
+    ...TYPOGRAPHY.body,
+    color: COLORS.text,
+  },
+  wearPrice: {
+    ...TYPOGRAPHY.body,
+    fontWeight: "600",
+    color: COLORS.success,
+  },
+  noPriceText: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.textSecondary,
+    textAlign: "center",
+    padding: SPACING.md,
   },
 });

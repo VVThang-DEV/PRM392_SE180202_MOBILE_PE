@@ -1,4 +1,5 @@
 import React from "react";
+import { Platform } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
@@ -6,6 +7,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { ListScreen } from "../screens/ListScreen";
 import { DetailScreen } from "../screens/DetailScreen";
 import { FavoritesScreen } from "../screens/FavoritesScreen";
+import { WearConditionScreen } from "../screens/WearConditionScreen";
+import { PatternSeedScreen } from "../screens/PatternSeedScreen";
 import { COLORS } from "../constants/theme";
 
 const Stack = createNativeStackNavigator();
@@ -33,7 +36,7 @@ const ListStack = () => {
         name="ListHome"
         component={ListScreen}
         options={{
-          title: "CS:GO Armory",
+          title: "SE1720 - YourName - SE######",
           headerLargeTitle: false,
         }}
       />
@@ -42,6 +45,22 @@ const ListStack = () => {
         component={DetailScreen}
         options={{
           title: "Skin Details",
+          headerBackTitle: "Back",
+        }}
+      />
+      <Stack.Screen
+        name="WearCondition"
+        component={WearConditionScreen}
+        options={{
+          title: "Wear Conditions",
+          headerBackTitle: "Back",
+        }}
+      />
+      <Stack.Screen
+        name="PatternSeed"
+        component={PatternSeedScreen}
+        options={{
+          title: "Pattern Seeds",
           headerBackTitle: "Back",
         }}
       />
@@ -83,6 +102,22 @@ const FavoritesStack = () => {
           headerBackTitle: "Back",
         }}
       />
+      <Stack.Screen
+        name="WearCondition"
+        component={WearConditionScreen}
+        options={{
+          title: "Wear Conditions",
+          headerBackTitle: "Back",
+        }}
+      />
+      <Stack.Screen
+        name="PatternSeed"
+        component={PatternSeedScreen}
+        options={{
+          title: "Pattern Seeds",
+          headerBackTitle: "Back",
+        }}
+      />
     </Stack.Navigator>
   );
 };
@@ -109,15 +144,17 @@ const TabNavigator = () => {
           backgroundColor: COLORS.surface,
           borderTopColor: COLORS.border,
           borderTopWidth: 1,
-          paddingBottom: 5,
+          paddingBottom: Platform.OS === "ios" ? 20 : 5, // Extra padding for iPhone notch/home indicator
           paddingTop: 5,
-          height: 60,
+          height: Platform.OS === "ios" ? 85 : 60, // Taller on iOS to accommodate safe area
         },
         tabBarLabelStyle: {
           fontSize: 12,
           fontWeight: "600",
+          marginBottom: Platform.OS === "ios" ? 0 : 5,
         },
         headerShown: false,
+        tabBarHideOnKeyboard: true, // Hide tab bar when keyboard is visible
       })}
     >
       <Tab.Screen
@@ -140,20 +177,38 @@ const TabNavigator = () => {
 
 // Main navigation component
 export const AppNavigator = () => {
+  const navigationTheme = {
+    dark: true,
+    colors: {
+      primary: COLORS.primary,
+      background: COLORS.background,
+      card: COLORS.surface,
+      text: COLORS.text,
+      border: COLORS.border,
+      notification: COLORS.accent,
+    },
+    fonts: {
+      regular: {
+        fontFamily: "System",
+        fontWeight: "400",
+      },
+      medium: {
+        fontFamily: "System",
+        fontWeight: "500",
+      },
+      bold: {
+        fontFamily: "System",
+        fontWeight: "700",
+      },
+      heavy: {
+        fontFamily: "System",
+        fontWeight: "900",
+      },
+    },
+  };
+
   return (
-    <NavigationContainer
-      theme={{
-        dark: true,
-        colors: {
-          primary: COLORS.primary,
-          background: COLORS.background,
-          card: COLORS.surface,
-          text: COLORS.text,
-          border: COLORS.border,
-          notification: COLORS.accent,
-        },
-      }}
-    >
+    <NavigationContainer theme={navigationTheme}>
       <TabNavigator />
     </NavigationContainer>
   );

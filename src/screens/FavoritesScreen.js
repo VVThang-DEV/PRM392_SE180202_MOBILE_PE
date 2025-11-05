@@ -1,112 +1,161 @@
 import React, { useState, useMemo } from "react";
 import { View, FlatList, Text, StyleSheet } from "react-native";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { Ionicons } from "@expo/vector-icons";
 import { SearchBar } from "../components/SearchBar";
-import { CategoryFilter } from "../components/CategoryFilter";
+import { FilterPanel } from "../components/FilterPanel";
 import { SkinCard } from "../components/SkinCard";
 import { useData } from "../context/DataContext";
-import { COLORS, SPACING, TYPOGRAPHY } from "../constants/theme";
+import { COLORS, SPACING, TYPOGRAPHY, BORDER_RADIUS } from "../constants/theme";
 
 export const FavoritesScreen = ({ navigation }) => {
-  const { getFavoriteItems } = useData();
-  const favoriteItems = getFavoriteItems();
+  const { items } = useData();
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("All");
+  const [filters, setFilters] = useState({
+    categories: [],
+    rarities: [],
+    wears: [],
+    stattrak: null,
+  });
 
-  // Extract unique categories from favorite items
-  const categories = useMemo(() => {
-    const categorySet = new Set();
-    favoriteItems.forEach((item) => {
-      if (item.category) {
-        categorySet.add(item.category);
-      }
-    });
-    return Array.from(categorySet).sort();
-  }, [favoriteItems]);
+  // Get only favorited items
+  const favoriteItems = useMemo(() => {
+    return items.filter((item) => item.isFavorite);
+  }, [items]);
 
-  // Filter favorites based on search and category
+  // Apply all filters to favorites
   const filteredFavorites = useMemo(() => {
     let filtered = favoriteItems;
 
-    // Filter by category
-    if (selectedCategory !== "All") {
-      filtered = filtered.filter((item) => item.category === selectedCategory);
-    }
-
-    // Filter by search query
+    // Search filter
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(
         (item) =>
           item.name?.toLowerCase().includes(query) ||
-          item.weapon?.toLowerCase().includes(query) ||
-          item.category?.toLowerCase().includes(query)
+          item.weaponName?.toLowerCase().includes(query) ||
+          item.weapon?.name?.toLowerCase().includes(query) ||
+          item.categoryName?.toLowerCase().includes(query) ||
+          item.patternName?.toLowerCase().includes(query)
       );
     }
 
+    // Category filter
+    if (filters.categories.length > 0) {
+      filtered = filtered.filter((item) =>
+        filters.categories.includes(item.categoryName || item.category?.name)
+      );
+    }
+
+    // Rarity filter
+    if (filters.rarities.length > 0) {
+      filtered = filtered.filter((item) =>
+        filters.rarities.includes(item.rarityName || item.rarity?.name)
+      );
+    }
+
+    // Wear filter
+    if (filters.wears.length > 0) {
+      filtered = filtered.filter((item) => {
+        const itemWears =
+          item.availableWears || item.wears?.map((w) => w.name) || [];
+        return filters.wears.some((wear) => itemWears.includes(wear));
+      });
+    }
+
+    // StatTrak filter
+    if (filters.stattrak !== null) {
+      filtered = filtered.filter((item) => item.stattrak === filters.stattrak);
+    }
+
     return filtered;
-  }, [favoriteItems, searchQuery, selectedCategory]);
+  }, [favoriteItems, searchQuery, filters]);
 
   const handleItemPress = (item) => {
-    navigation.navigate("Detail", { itemId: item._id });
+    navigation.navigate("Detail", { itemId: item.id || item._id });
   };
 
-  const renderItem = ({ item, index }) => (
-    <SkinCard item={item} onPress={() => handleItemPress(item)} index={index} />
+  const renderItem = ({ item }) => (
+    <SkinCard item={item} onPress={() => handleItemPress(item)} />
   );
 
-  const renderEmpty = () => (
-    <View style={styles.emptyContainer}>
-      <Ionicons name="star-outline" size={64} color={COLORS.textMuted} />
-      <Text style={styles.emptyTitle}>
-        {searchQuery || selectedCategory !== "All"
-          ? "No favorites match your filters"
-          : "No favorites yet"}
-      </Text>
-      <Text style={styles.emptySubtitle}>
-        {searchQuery || selectedCategory !== "All"
-          ? "Try adjusting your search or filters"
-          : "Swipe left or right on any skin card to add it to your favorites"}
-      </Text>
-    </View>
-  );
+  const renderEmpty = () => {
+    const hasFilters =
+      searchQuery ||
+      filters.categories.length > 0 ||
+      filters.rarities.length > 0 ||
+      filters.wears.length > 0 ||
+      filters.stattrak !== null;
+
+    if (favoriteItems.length === 0) {
+      return (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyIcon}>⭐</Text>
+          <Text style={styles.emptyText}>No favorites yet</Text>
+          <Text style={styles.emptySubtext}>
+            Tap the star icon on any skin to add it to your favorites
+          </Text>
+        </View>
+      );
+    }
+
+    if (hasFilters) {
+      return (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>No favorites match your filters</Text>
+          <Text style={styles.emptySubtext}>
+            Try adjusting your filters or search term
+          </Text>
+        </View>
+      );
+    }
+
+    return null;
+  };
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <View style={styles.container}>
-        {favoriteItems.length > 0 && (
-          <>
+    <View style={styles.container}>
+      {/* Search and Filter Section */}
+      {favoriteItems.length > 0 && (
+        <View style={styles.topSection}>
+          {/* Search Bar */}
+          <View style={styles.searchContainer}>
             <SearchBar
               value={searchQuery}
               onChangeText={setSearchQuery}
               placeholder="Search favorites..."
             />
+          </View>
 
-            {categories.length > 0 && (
-              <CategoryFilter
-                categories={categories}
-                selectedCategory={selectedCategory}
-                onSelectCategory={setSelectedCategory}
-              />
-            )}
-          </>
-        )}
+          {/* Filter Button and Count */}
+          <View style={styles.filterContainer}>
+            <FilterPanel items={favoriteItems} onFiltersChange={setFilters} />
+            <View style={styles.resultBadge}>
+              <Text style={styles.resultCount}>
+                {filteredFavorites.length}{" "}
+                {filteredFavorites.length === 1 ? "favorite" : "favorites"}
+              </Text>
+            </View>
+          </View>
+        </View>
+      )}
 
-        <FlatList
-          data={filteredFavorites}
-          renderItem={renderItem}
-          keyExtractor={(item) => item._id}
-          contentContainerStyle={[
-            styles.listContent,
-            filteredFavorites.length === 0 && styles.listContentEmpty,
-          ]}
-          ListEmptyComponent={renderEmpty}
-          showsVerticalScrollIndicator={false}
-        />
-      </View>
-    </GestureHandlerRootView>
+      {/* List */}
+      <FlatList
+        data={filteredFavorites}
+        renderItem={renderItem}
+        keyExtractor={(item) => item.id || item._id}
+        contentContainerStyle={[
+          styles.listContent,
+          filteredFavorites.length === 0 && styles.listContentEmpty,
+        ]}
+        ListEmptyComponent={renderEmpty}
+        showsVerticalScrollIndicator={false}
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        updateCellsBatchingPeriod={50}
+        windowSize={10}
+      />
+    </View>
   );
 };
 
@@ -114,14 +163,43 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
-    paddingTop: SPACING.md,
+  },
+  topSection: {
+    backgroundColor: COLORS.surface,
+    paddingBottom: SPACING.md,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  searchContainer: {
+    padding: SPACING.md,
+  },
+  filterContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: SPACING.md,
+    gap: SPACING.md,
+  },
+  resultBadge: {
+    backgroundColor: COLORS.background,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.full,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  resultCount: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.text,
+    fontWeight: "700",
+    fontSize: 12,
   },
   listContent: {
-    paddingBottom: SPACING.xl,
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.xl * 2,
   },
   listContentEmpty: {
     flexGrow: 1,
-    justifyContent: "center",
   },
   emptyContainer: {
     flex: 1,
@@ -129,16 +207,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: SPACING.xl,
   },
-  emptyTitle: {
-    ...TYPOGRAPHY.h3,
-    marginTop: SPACING.lg,
-    marginBottom: SPACING.sm,
-    textAlign: "center",
+  emptyIcon: {
+    fontSize: 72,
+    marginBottom: SPACING.lg,
+    opacity: 0.4,
   },
-  emptySubtitle: {
+  emptyText: {
+    ...TYPOGRAPHY.h2,
+    color: COLORS.textMuted,
+    textAlign: "center",
+    marginBottom: SPACING.sm,
+    fontWeight: "700",
+  },
+  emptySubtext: {
     ...TYPOGRAPHY.body,
-    color: COLORS.textSecondary,
+    color: COLORS.textMuted,
     textAlign: "center",
     maxWidth: 280,
+    lineHeight: 22,
   },
 });

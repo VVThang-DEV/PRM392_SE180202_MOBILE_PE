@@ -37,9 +37,13 @@ export const COLORS = {
 };
 
 export const SPACING = {
+  tiny: 4,
   xs: 4,
+  small: 8,
   sm: 8,
+  medium: 16,
   md: 16,
+  large: 24,
   lg: 24,
   xl: 32,
   xxl: 48,
@@ -108,9 +112,14 @@ export const SHADOWS = {
 };
 
 export const BORDER_RADIUS = {
+  small: 4,
   sm: 4,
+  medium: 8,
   md: 8,
+  large: 12,
   lg: 12,
   xl: 16,
+  xxl: 20,
+  round: 9999,
   full: 9999,
 };
