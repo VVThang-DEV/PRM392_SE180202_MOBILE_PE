@@ -1,29 +1,48 @@
 {
   "expo": {
-    "name": "PRM392_SE180202_MOBILE_PE",
-    "slug": "PRM392_SE180202_MOBILE_PE",
+    "name": "CS:GO Armory",
+    "slug": "csgo-armory",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0f1923"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.se1720.csgoarmory"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#0f1923"
       },
+      "package": "com.se1720.csgoarmory",
+      "versionCode": 1,
+      "permissions": ["INTERNET", "ACCESS_NETWORK_STATE"],
       "edgeToEdgeEnabled": true
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "kotlinVersion": "1.8.0"
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "your-project-id-here"
+      }
     }
   }
 }
