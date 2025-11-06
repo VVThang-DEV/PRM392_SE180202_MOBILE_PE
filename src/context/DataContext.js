@@ -50,21 +50,34 @@ export const DataProvider = ({ children }) => {
     try {
       const currentVersion = "1.0.0"; // Update this when you bump version
       const hasBeenInitialized = await AsyncStorage.getItem("@app_initialized");
+      const hasData = await AsyncStorage.getItem("@csgo_items");
 
-      // Always clear storage on first run (fresh install/update)
-      if (!hasBeenInitialized) {
+      // Clear storage if never initialized OR if initialized but no data (incomplete initialization)
+      if (!hasBeenInitialized || (hasBeenInitialized && !hasData)) {
         console.log(
-          "🆕 First app run detected, clearing storage for clean start..."
+          "🆕 First app run or incomplete initialization detected, clearing storage for clean start..."
         );
         await clearAllStorage();
+        // Set initialization flag AFTER clearing (so it doesn't get cleared too!)
         await AsyncStorage.setItem("@app_initialized", "true");
         await AsyncStorage.setItem("@app_version", currentVersion);
         console.log("✅ Storage cleared and app initialized");
       } else {
-        console.log("📱 App already initialized, keeping existing data");
+        console.log(
+          "📱 App already properly initialized, keeping existing data"
+        );
       }
     } catch (error) {
       console.error("Error initializing app:", error);
+      // On error, try to initialize anyway
+      try {
+        await clearAllStorage();
+        await AsyncStorage.setItem("@app_initialized", "true");
+        await AsyncStorage.setItem("@app_version", "1.0.0");
+        console.log("✅ Emergency initialization completed");
+      } catch (emergencyError) {
+        console.error("Emergency initialization failed:", emergencyError);
+      }
     }
   }, []);
 
@@ -88,9 +101,12 @@ export const DataProvider = ({ children }) => {
 
   // Load initial data
   useEffect(() => {
-    checkAppVersion(); // Check version and clear storage if needed
-    loadData();
-    loadPrices();
+    const initializeApp = async () => {
+      await checkAppVersion(); // Wait for initialization to complete
+      loadData();
+      loadPrices();
+    };
+    initializeApp();
   }, [checkAppVersion]);
 
   // Set up real-time price updates with polling
