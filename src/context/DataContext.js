@@ -45,22 +45,26 @@ export const DataProvider = ({ children }) => {
   const priceUpdateInterval = useRef(null);
   const appState = useRef(AppState.currentState);
 
-  // Check app version and clear storage if version changed
+  // Always clear storage on first app open for clean experience
   const checkAppVersion = useCallback(async () => {
     try {
       const currentVersion = "1.0.0"; // Update this when you bump version
-      const storedVersion = await AsyncStorage.getItem("@app_version");
+      const hasBeenInitialized = await AsyncStorage.getItem("@app_initialized");
 
-      if (!storedVersion || storedVersion !== currentVersion) {
+      // Always clear storage on first run (fresh install/update)
+      if (!hasBeenInitialized) {
         console.log(
-          `App version changed from ${storedVersion} to ${currentVersion}, clearing storage...`
+          "🆕 First app run detected, clearing storage for clean start..."
         );
         await clearAllStorage();
+        await AsyncStorage.setItem("@app_initialized", "true");
         await AsyncStorage.setItem("@app_version", currentVersion);
-        console.log("✅ Storage cleared for new app version");
+        console.log("✅ Storage cleared and app initialized");
+      } else {
+        console.log("📱 App already initialized, keeping existing data");
       }
     } catch (error) {
-      console.error("Error checking app version:", error);
+      console.error("Error initializing app:", error);
     }
   }, []);
 
