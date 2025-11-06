@@ -6,6 +6,7 @@ import {
   Text,
   StyleSheet,
   RefreshControl,
+  TouchableOpacity,
 } from "react-native";
 import { SearchBar } from "../components/SearchBar";
 import { FilterPanel } from "../components/FilterPanel";
@@ -15,7 +16,8 @@ import { useData } from "../context/DataContext";
 import { COLORS, SPACING, TYPOGRAPHY, BORDER_RADIUS } from "../constants/theme";
 
 export const ListScreen = ({ navigation }) => {
-  const { items, isLoading, error, syncFromAPI } = useData();
+  const { items, isLoading, error, syncFromAPI, retryLoadData, isConnected } =
+    useData();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -132,8 +134,17 @@ export const ListScreen = ({ navigation }) => {
   if (error && items.length === 0) {
     return (
       <View style={styles.centerContainer}>
+        <Text style={styles.errorIcon}>⚠️</Text>
         <Text style={styles.errorText}>{error}</Text>
-        <Text style={styles.errorSubtext}>Pull to refresh</Text>
+        {!isConnected && (
+          <Text style={styles.errorSubtext}>
+            No internet connection detected
+          </Text>
+        )}
+        <TouchableOpacity style={styles.retryButton} onPress={retryLoadData}>
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+        <Text style={styles.errorHint}>or pull down to refresh</Text>
       </View>
     );
   }
@@ -261,11 +272,34 @@ const styles = StyleSheet.create({
     color: COLORS.error,
     textAlign: "center",
     fontWeight: "700",
+    marginTop: SPACING.md,
+  },
+  errorIcon: {
+    fontSize: 48,
+    marginBottom: SPACING.md,
   },
   errorSubtext: {
     ...TYPOGRAPHY.body,
     marginTop: SPACING.sm,
     color: COLORS.textMuted,
+  },
+  errorHint: {
+    ...TYPOGRAPHY.caption,
+    marginTop: SPACING.md,
+    color: COLORS.textMuted,
+    fontStyle: "italic",
+  },
+  retryButton: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.xl,
+    paddingVertical: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
+    marginTop: SPACING.lg,
+  },
+  retryButtonText: {
+    ...TYPOGRAPHY.button,
+    color: COLORS.white,
+    fontWeight: "700",
   },
   emptyContainer: {
     padding: SPACING.xl,

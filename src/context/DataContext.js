@@ -6,6 +6,8 @@ import React, {
   useCallback,
   useRef,
 } from "react";
+import { AppState, Platform } from "react-native";
+import NetInfo from "@react-native-community/netinfo";
 import {
   getItems,
   saveItems,
@@ -19,7 +21,6 @@ import {
   savePriceSnapshotToSupabase,
   isSupabaseConfigured,
 } from "../services/supabaseService";
-import { AppState } from "react-native";
 
 const DataContext = createContext();
 
@@ -38,8 +39,27 @@ export const DataProvider = ({ children }) => {
   const [error, setError] = useState(null);
   const [priceData, setPriceData] = useState(null);
   const [lastPriceUpdate, setLastPriceUpdate] = useState(null);
+  const [isConnected, setIsConnected] = useState(true);
   const priceUpdateInterval = useRef(null);
   const appState = useRef(AppState.currentState);
+
+  // Monitor network connectivity
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      console.log(
+        "Network state:",
+        state.isConnected ? "Connected" : "Disconnected"
+      );
+      setIsConnected(state.isConnected);
+
+      if (state.isConnected && error && error.includes("Network")) {
+        console.log("Network reconnected, retrying data load...");
+        loadData();
+      }
+    });
+
+    return () => unsubscribe();
+  }, [error]);
 
   // Load initial data
   useEffect(() => {
@@ -128,16 +148,20 @@ export const DataProvider = ({ children }) => {
       setIsLoading(true);
       setError(null);
 
+      console.log("Loading data from storage...");
+
       // Load from storage
       const [storedItems, storedFavorites] = await Promise.all([
         getItems(),
         getFavorites(),
       ]);
 
+      console.log(`Loaded ${storedItems.length} items from storage`);
       setFavorites(storedFavorites);
 
       // If no items in storage, fetch from API
       if (storedItems.length === 0) {
+        console.log("No cached data, fetching from API...");
         await syncFromAPI();
       } else {
         // Transform stored items to add convenience fields
@@ -159,12 +183,14 @@ export const DataProvider = ({ children }) => {
         }));
         setItems(transformedItems);
         setIsLoading(false);
+        console.log("Data loaded successfully!");
       }
     } catch (err) {
-      setError(
-        "Could not load data. Please check your connection and try again."
-      );
       console.error("Load data error:", err);
+      const errorMessage =
+        err.message ||
+        "Could not load data. Please check your connection and try again.";
+      setError(errorMessage);
       setIsLoading(false);
     }
   };
@@ -172,7 +198,23 @@ export const DataProvider = ({ children }) => {
   const syncFromAPI = async () => {
     try {
       setError(null);
+
+      // Check network connectivity first
+      const netInfo = await NetInfo.fetch();
+      if (!netInfo.isConnected) {
+        throw new Error(
+          "No internet connection. Please check your network and try again."
+        );
+      }
+
+      console.log("Syncing data from API...");
       const apiData = await fetchSkinsFromAPI();
+
+      if (!apiData || apiData.length === 0) {
+        throw new Error("No data received from API");
+      }
+
+      console.log(`Processing ${apiData.length} items from API...`);
 
       // Process and save items
       const processedItems = apiData.map((skin, index) => {
@@ -230,10 +272,15 @@ export const DataProvider = ({ children }) => {
       setItems(processedItems);
       setIsLoading(false);
 
+      console.log(`Successfully synced ${processedItems.length} items`);
       return processedItems.length;
     } catch (err) {
-      setError("Could not sync data from API.");
       console.error("Sync error:", err);
+      const errorMessage =
+        err.message && err.message.includes("Failed to fetch")
+          ? "Network error. Please check your internet connection and try again."
+          : err.message || "Could not sync data from API.";
+      setError(errorMessage);
       setIsLoading(false);
       throw err;
     }
@@ -263,6 +310,11 @@ export const DataProvider = ({ children }) => {
     return items.filter((item) => favorites[item._id]);
   }, [items, favorites]);
 
+  const retryLoadData = useCallback(async () => {
+    console.log("Retrying data load...");
+    await loadData();
+  }, []);
+
   const value = {
     items,
     favorites,
@@ -270,10 +322,12 @@ export const DataProvider = ({ children }) => {
     error,
     priceData,
     lastPriceUpdate,
+    isConnected,
     syncFromAPI,
     toggleFavorite,
     getFavoriteItems,
     refreshPrices: loadPrices,
+    retryLoadData,
     isFavorite: (itemId) => !!favorites[itemId],
   };
 

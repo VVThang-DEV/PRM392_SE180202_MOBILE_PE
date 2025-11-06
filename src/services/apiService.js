@@ -1,4 +1,34 @@
 const API_BASE_URL = "https://bymykel.github.io/CSGO-API/api/en";
+const FETCH_TIMEOUT = 30000; // 30 seconds timeout
+
+/**
+ * Fetch with timeout wrapper
+ * @param {string} url - URL to fetch
+ * @param {number} timeout - Timeout in milliseconds
+ * @returns {Promise<Response>}
+ */
+const fetchWithTimeout = async (url, timeout = FETCH_TIMEOUT) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        "Cache-Control": "no-cache",
+      },
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === "AbortError") {
+      throw new Error("Request timeout - server took too long to respond");
+    }
+    throw error;
+  }
+};
 
 /**
  * Fetches CS:GO skins data from the public API
@@ -16,7 +46,7 @@ export const fetchSkinsFromAPI = async () => {
     for (const endpoint of endpoints) {
       try {
         console.log(`Trying endpoint: ${endpoint}`);
-        const response = await fetch(endpoint);
+        const response = await fetchWithTimeout(endpoint);
 
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
