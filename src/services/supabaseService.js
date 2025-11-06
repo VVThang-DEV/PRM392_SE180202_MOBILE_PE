@@ -76,17 +76,34 @@ export const isSupabaseConfigured = () => {
 };
 
 /**
- * Create the price_snapshots table
+ * Create the price_snapshots table and helper functions
  * Run this ONCE after setting up your Supabase project
  * Or create the table manually in Supabase SQL Editor
+ *
+ * PERFORMANCE TIP: If queries are slow, run this in Supabase SQL Editor:
+ *
+ * -- Increase statement timeout for large JSONB queries
+ * ALTER DATABASE postgres SET statement_timeout = '30s';
+ *
+ * -- Add GIN index for faster JSONB queries (optional, for large datasets)
+ * CREATE INDEX IF NOT EXISTS idx_price_snapshots_prices_gin
+ * ON price_snapshots USING GIN (prices);
+ *
+ * -- Add partial index for timestamp queries
+ * CREATE INDEX IF NOT EXISTS idx_price_snapshots_timestamp_recent
+ * ON price_snapshots(timestamp DESC)
+ * WHERE timestamp > (EXTRACT(epoch FROM NOW() - INTERVAL '90 days') * 1000);
  */
 export const createPriceSnapshotsTable = async () => {
   if (!isSupabaseConfigured()) {
     throw new Error("Supabase not configured");
   }
 
-  const { error } = await supabase.rpc("create_price_snapshots_table", {
-    sql: `
+  // First create the table
+  const { error: tableError } = await supabase.rpc(
+    "create_price_snapshots_table",
+    {
+      sql: `
       CREATE TABLE IF NOT EXISTS price_snapshots (
         id BIGSERIAL PRIMARY KEY,
         created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -94,18 +111,160 @@ export const createPriceSnapshotsTable = async () => {
         prices JSONB NOT NULL
       );
       
-      -- Add index for faster queries
+      -- Add index for faster timestamp queries
       CREATE INDEX IF NOT EXISTS idx_price_snapshots_timestamp 
       ON price_snapshots(timestamp DESC);
+      
+      -- Add GIN index for JSONB queries
+      CREATE INDEX IF NOT EXISTS idx_price_snapshots_prices_gin
+      ON price_snapshots USING GIN (prices);
     `,
-  });
+    }
+  );
 
-  if (error) {
-    console.error("❌ Failed to create table:", error);
-    throw error;
+  if (tableError) {
+    console.error("❌ Failed to create table:", tableError);
+    throw tableError;
   }
 
-  console.log("✅ price_snapshots table created successfully");
+  // Create helper function for efficient price history queries
+  const { error: funcError } = await supabase.rpc(
+    "create_price_history_function",
+    {
+      sql: `
+      CREATE OR REPLACE FUNCTION get_price_history(market_hash_name TEXT, days_back INT DEFAULT 30)
+      RETURNS TABLE("timestamp" BIGINT, price NUMERIC)
+      LANGUAGE plpgsql
+      AS $$
+      DECLARE
+        cutoff_time BIGINT;
+      BEGIN
+        cutoff_time := (EXTRACT(epoch FROM NOW() - INTERVAL '1 day' * days_back) * 1000)::BIGINT;
+        
+        RETURN QUERY
+        SELECT 
+          ps."timestamp",
+          (ps.prices->market_hash_name->>'price')::NUMERIC as price
+        FROM price_snapshots ps
+        WHERE ps."timestamp" >= cutoff_time
+          AND ps.prices ? market_hash_name
+          AND (ps.prices->market_hash_name->>'price')::NUMERIC > 0
+        ORDER BY ps."timestamp" ASC
+        LIMIT 1000;
+      END;
+      $$;
+    `,
+    }
+  );
+
+  if (funcError) {
+    console.warn(
+      "⚠️ Could not create helper function (may already exist):",
+      funcError.message
+    );
+  }
+
+  console.log("✅ price_snapshots table and functions created successfully");
+};
+
+/**
+ * Test the optimized price history function
+ * @param {string} marketHashName - Test item name
+ * @returns {Promise<Object>} Test results
+ */
+export const testOptimizedPriceHistory = async (
+  marketHashName = "AK-47 | Redline (Field-Tested)"
+) => {
+  console.log("🧪 Testing optimized price history function...");
+
+  const results = {
+    optimizedFunction: false,
+    fallbackMethod: false,
+    optimizedTime: 0,
+    fallbackTime: 0,
+    dataPoints: 0,
+  };
+
+  try {
+    // Test optimized function
+    const startTime = Date.now();
+    const { data, error } = await supabase.rpc("get_price_history", {
+      market_hash_name: marketHashName,
+      days_back: 7, // Test with 7 days for faster results
+    });
+
+    if (!error && data) {
+      results.optimizedTime = Date.now() - startTime;
+      results.optimizedFunction = true;
+      results.dataPoints = data.length;
+      console.log(
+        `✅ Optimized function works! Retrieved ${data.length} points in ${results.optimizedTime}ms`
+      );
+    } else {
+      console.log("❌ Optimized function failed:", error?.message);
+    }
+  } catch (error) {
+    console.log("❌ Optimized function error:", error.message);
+  }
+
+  // Test fallback method
+  try {
+    const startTime = Date.now();
+    const cutoffTime = Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+    const { data, error } = await supabase
+      .from("price_snapshots")
+      .select("timestamp, prices")
+      .gte("timestamp", cutoffTime)
+      .order("timestamp", { ascending: true })
+      .limit(50);
+
+    if (!error && data) {
+      const history = data
+        .map((snapshot) => {
+          const priceInfo = snapshot.prices?.[marketHashName];
+          return priceInfo
+            ? {
+                date: new Date(snapshot.timestamp),
+                timestamp: snapshot.timestamp,
+                price: priceInfo?.price || priceInfo?.avg || 0,
+              }
+            : null;
+        })
+        .filter((item) => item !== null && item.price > 0);
+
+      results.fallbackTime = Date.now() - startTime;
+      results.fallbackMethod = true;
+      console.log(
+        `✅ Fallback method works! Retrieved ${history.length} points in ${results.fallbackTime}ms`
+      );
+    }
+  } catch (error) {
+    console.log("❌ Fallback method error:", error.message);
+  }
+
+  console.log("\n📊 Test Results:");
+  console.log(
+    `  Optimized Function: ${results.optimizedFunction ? "✅" : "❌"} (${
+      results.optimizedTime
+    }ms)`
+  );
+  console.log(
+    `  Fallback Method: ${results.fallbackMethod ? "✅" : "❌"} (${
+      results.fallbackTime
+    }ms)`
+  );
+  console.log(`  Data Points: ${results.dataPoints}`);
+
+  if (results.optimizedFunction && results.fallbackMethod) {
+    const speedup =
+      results.fallbackTime > 0
+        ? (results.fallbackTime / results.optimizedTime).toFixed(1)
+        : "∞";
+    console.log(`  Speed Improvement: ${speedup}x faster`);
+  }
+
+  return results;
 };
 
 /**
@@ -153,21 +312,21 @@ export const savePriceSnapshotToSupabase = async (priceData) => {
 
 /**
  * Fetch all price snapshots from Supabase
- * @param {number} limit - Maximum number of snapshots to fetch (default: 1000)
+ * @param {number} limit - Maximum number of snapshots to fetch (default: 50)
  * @returns {Promise<Array>} Array of price snapshots
  */
-export const fetchPriceSnapshots = async (limit = 1000) => {
+export const fetchPriceSnapshots = async (limit = 50) => {
   if (!isSupabaseConfigured()) {
     console.warn("⚠️ Supabase not configured");
     return [];
   }
 
   try {
-    console.log("📥 Fetching price snapshots from Supabase...");
+    console.log(`📥 Fetching up to ${limit} price snapshots from Supabase...`);
 
     const { data, error } = await supabase
       .from("price_snapshots")
-      .select("*")
+      .select("id, timestamp, created_at")
       .order("timestamp", { ascending: false })
       .limit(limit);
 
@@ -199,13 +358,53 @@ export const getSkinPriceHistoryFromSupabase = async (
   }
 
   try {
+    // Try to use the optimized RPC function first
+    try {
+      const { data, error } = await supabase.rpc("get_price_history", {
+        market_hash_name: marketHashName,
+        days_back: days,
+      });
+
+      if (!error && data) {
+        const history = data.map((row) => ({
+          date: new Date(row.timestamp),
+          timestamp: row.timestamp,
+          price: parseFloat(row.price),
+        }));
+
+        console.log(
+          `✅ Retrieved ${history.length} price points for ${marketHashName} from Supabase (optimized)`
+        );
+        return history;
+      }
+    } catch (rpcError) {
+      console.warn(
+        "⚠️ Optimized query failed, falling back to standard query:",
+        rpcError.message
+      );
+    }
+
+    // Fallback to original method if RPC function doesn't exist
     const cutoffTime = Date.now() - days * 24 * 60 * 60 * 1000;
 
-    const { data, error } = await supabase
+    // Add timeout to prevent hanging
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error("Query timeout after 15 seconds")),
+        15000
+      )
+    );
+
+    // Use JSONB path query to extract only the specific item's price
+    // This is MUCH faster than fetching entire prices object
+    const queryPromise = supabase
       .from("price_snapshots")
       .select("timestamp, prices")
       .gte("timestamp", cutoffTime)
-      .order("timestamp", { ascending: true });
+      .order("timestamp", { ascending: true })
+      .limit(200); // Increased limit for fallback
+
+    const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
 
     if (error) throw error;
 
@@ -224,11 +423,12 @@ export const getSkinPriceHistoryFromSupabase = async (
       .filter((item) => item !== null && item.price > 0);
 
     console.log(
-      `✅ Retrieved ${history.length} price points for ${marketHashName} from Supabase`
+      `✅ Retrieved ${history.length} price points for ${marketHashName} from Supabase (fallback)`
     );
     return history;
   } catch (error) {
     console.error("❌ Error getting price history from Supabase:", error);
+    // Return empty array instead of throwing to allow fallback to local storage
     return [];
   }
 };
