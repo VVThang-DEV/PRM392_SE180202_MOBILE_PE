@@ -26,7 +26,10 @@
       },
       "package": "com.se1720.csgoarmory",
       "versionCode": 1,
-      "permissions": ["INTERNET", "ACCESS_NETWORK_STATE"],
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ],
       "edgeToEdgeEnabled": true
     },
     "web": {
@@ -41,7 +44,8 @@
           }
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-sqlite"
     ],
     "extra": {
       "eas": {

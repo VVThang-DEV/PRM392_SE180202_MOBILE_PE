@@ -16,8 +16,15 @@ import { useData } from "../context/DataContext";
 import { COLORS, SPACING, TYPOGRAPHY, BORDER_RADIUS } from "../constants/theme";
 
 export const ListScreen = ({ navigation }) => {
-  const { items, isLoading, error, syncFromAPI, retryLoadData, isConnected } =
-    useData();
+  const {
+    items,
+    isLoading,
+    error,
+    syncFromAPI,
+    retryLoadData,
+    clearStorageAndRetry,
+    isConnected,
+  } = useData();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -132,6 +139,11 @@ export const ListScreen = ({ navigation }) => {
   }
 
   if (error && items.length === 0) {
+    const isStorageError =
+      error.includes("Storage is full") ||
+      error.includes("sqlite_full") ||
+      error.includes("database or disk is full");
+
     return (
       <View style={styles.centerContainer}>
         <Text style={styles.errorIcon}>⚠️</Text>
@@ -141,9 +153,19 @@ export const ListScreen = ({ navigation }) => {
             No internet connection detected
           </Text>
         )}
-        <TouchableOpacity style={styles.retryButton} onPress={retryLoadData}>
-          <Text style={styles.retryButtonText}>Retry</Text>
-        </TouchableOpacity>
+        <View style={styles.buttonContainer}>
+          <TouchableOpacity style={styles.retryButton} onPress={retryLoadData}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+          {isStorageError && (
+            <TouchableOpacity
+              style={[styles.retryButton, styles.clearButton]}
+              onPress={clearStorageAndRetry}
+            >
+              <Text style={styles.retryButtonText}>Clear Storage</Text>
+            </TouchableOpacity>
+          )}
+        </View>
         <Text style={styles.errorHint}>or pull down to refresh</Text>
       </View>
     );
@@ -295,6 +317,14 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.md,
     borderRadius: BORDER_RADIUS.md,
     marginTop: SPACING.lg,
+  },
+  buttonContainer: {
+    flexDirection: "row",
+    gap: SPACING.md,
+    marginTop: SPACING.lg,
+  },
+  clearButton: {
+    backgroundColor: COLORS.error,
   },
   retryButtonText: {
     ...TYPOGRAPHY.button,

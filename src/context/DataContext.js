@@ -8,12 +8,14 @@ import React, {
 } from "react";
 import { AppState, Platform } from "react-native";
 import NetInfo from "@react-native-community/netinfo";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   getItems,
   saveItems,
   getFavorites,
   saveFavorites,
 } from "../database/storage";
+import { clearAllStorage, getStorageInfo } from "../database/storageCleanup";
 import { fetchSkinsFromAPI, determineCategory } from "../services/apiService";
 import { fetchPriceData } from "../services/priceService";
 import { savePriceSnapshot } from "../services/priceHistoryService";
@@ -43,6 +45,25 @@ export const DataProvider = ({ children }) => {
   const priceUpdateInterval = useRef(null);
   const appState = useRef(AppState.currentState);
 
+  // Check app version and clear storage if version changed
+  const checkAppVersion = useCallback(async () => {
+    try {
+      const currentVersion = "1.0.0"; // Update this when you bump version
+      const storedVersion = await AsyncStorage.getItem("@app_version");
+
+      if (!storedVersion || storedVersion !== currentVersion) {
+        console.log(
+          `App version changed from ${storedVersion} to ${currentVersion}, clearing storage...`
+        );
+        await clearAllStorage();
+        await AsyncStorage.setItem("@app_version", currentVersion);
+        console.log("✅ Storage cleared for new app version");
+      }
+    } catch (error) {
+      console.error("Error checking app version:", error);
+    }
+  }, []);
+
   // Monitor network connectivity
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
@@ -63,9 +84,10 @@ export const DataProvider = ({ children }) => {
 
   // Load initial data
   useEffect(() => {
+    checkAppVersion(); // Check version and clear storage if needed
     loadData();
     loadPrices();
-  }, []);
+  }, [checkAppVersion]);
 
   // Set up real-time price updates with polling
   // NOTE: Price tracking only works while app is open/active
@@ -190,7 +212,19 @@ export const DataProvider = ({ children }) => {
       const errorMessage =
         err.message ||
         "Could not load data. Please check your connection and try again.";
-      setError(errorMessage);
+
+      // Check if it's a SQLite/database full error
+      if (
+        errorMessage.includes("sqlite_full") ||
+        errorMessage.includes("database or disk is full")
+      ) {
+        console.warn("SQLite database full error detected");
+        setError(
+          "Storage is full. Tap 'Clear Storage' to free up space and reload data."
+        );
+      } else {
+        setError(errorMessage);
+      }
       setIsLoading(false);
     }
   };
@@ -315,6 +349,29 @@ export const DataProvider = ({ children }) => {
     await loadData();
   }, []);
 
+  const clearStorageAndRetry = useCallback(async () => {
+    try {
+      console.log("Storage error detected, clearing storage and retrying...");
+      setError("Clearing storage due to database error...");
+
+      // Get storage info before clearing
+      await getStorageInfo();
+
+      // Clear all storage
+      const cleared = await clearAllStorage();
+      if (cleared) {
+        console.log("Storage cleared, retrying data load...");
+        setError(null);
+        await loadData();
+      } else {
+        setError("Failed to clear storage. Please restart the app.");
+      }
+    } catch (err) {
+      console.error("Error clearing storage:", err);
+      setError("Storage error: " + err.message);
+    }
+  }, []);
+
   const value = {
     items,
     favorites,
@@ -328,6 +385,7 @@ export const DataProvider = ({ children }) => {
     getFavoriteItems,
     refreshPrices: loadPrices,
     retryLoadData,
+    clearStorageAndRetry,
     isFavorite: (itemId) => !!favorites[itemId],
   };
 
