@@ -485,6 +485,7 @@ const styles = StyleSheet.create({
   },
   topMoversScroll: {
     paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.sm,
     gap: SPACING.md,
   },
   topMoverCard: {
@@ -503,14 +504,14 @@ const styles = StyleSheet.create({
   },
   rankBadge: {
     position: "absolute",
-    top: -10,
-    right: -10,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    top: 8,
+    right: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: COLORS.card,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
@@ -521,7 +522,7 @@ const styles = StyleSheet.create({
   },
   rankBadgeText: {
     color: "#fff",
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: "900",
     textShadowColor: "rgba(0, 0, 0, 0.3)",
     textShadowOffset: { width: 0, height: 1 },

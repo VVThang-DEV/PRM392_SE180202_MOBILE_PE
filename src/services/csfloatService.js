@@ -26,11 +26,17 @@ async function fetchAllSkinsData() {
     let entriesCreated = 0;
 
     skins.forEach((skin) => {
+      // Get weapon/item name - Remove ★ prefix for knives to match CSFloat format
+      const baseName = (skin.name || "").replace(/^★\s+/, "");
+      const weaponName = skin.weapon?.name || "";
+      const category = skin.category?.name || "";
+
       // Build market hash name for each wear
       if (skin.wears && skin.wears.length > 0) {
         skin.wears.forEach((wear) => {
           const wearName = wear.name;
-          const marketHashName = `${skin.name} (${wearName})`;
+          const marketHashName = `${baseName} (${wearName})`;
+
           skinsMap[marketHashName] = {
             ...skin,
             wearName: wearName,
@@ -49,10 +55,22 @@ async function fetchAllSkinsData() {
             };
             entriesCreated++;
           }
+
+          // Add Souvenir version if applicable
+          if (skin.souvenir) {
+            const souvenirName = `Souvenir ${marketHashName}`;
+            skinsMap[souvenirName] = {
+              ...skin,
+              wearName: wearName,
+              image: skin.image,
+              isSouvenir: true,
+            };
+            entriesCreated++;
+          }
         });
       } else {
-        // Items without wears (knives, gloves, etc.)
-        skinsMap[skin.name] = {
+        // Items without wears (vanilla knives, gloves without skins, etc.)
+        skinsMap[baseName] = {
           ...skin,
           image: skin.image,
         };
@@ -60,7 +78,7 @@ async function fetchAllSkinsData() {
 
         // Add StatTrak version for items without wears
         if (skin.stattrak) {
-          skinsMap[`StatTrak™ ${skin.name}`] = {
+          skinsMap[`StatTrak™ ${baseName}`] = {
             ...skin,
             image: skin.image,
             isStatTrak: true,
@@ -68,10 +86,23 @@ async function fetchAllSkinsData() {
           entriesCreated++;
         }
       }
+
+      // Debug first 5 entries to check matching
+      if (entriesCreated <= 15) {
+        const exampleKey = Object.keys(skinsMap)[entriesCreated - 1];
+        console.log(
+          `📝 Example entry #${entriesCreated}: "${exampleKey}" -> ${
+            weaponName || category
+          }`
+        );
+      }
     });
 
     console.log(
       `✅ Created ${entriesCreated} market hash name entries for price matching`
+    );
+    console.log(
+      `📊 Sample market names: ${Object.keys(skinsMap).slice(0, 5).join(", ")}`
     );
     return skinsMap;
   } catch (error) {
@@ -112,11 +143,23 @@ export async function fetchTrendingListings(limit = 0) {
     const dataArray = await priceResponse.json();
     console.log(`✅ Loaded ${dataArray.length} items from price list`);
 
+    // Log sample market hash names to debug matching
+    console.log(`📋 Sample CSFloat market names:`);
+    dataArray.slice(0, 10).forEach((item, idx) => {
+      console.log(`  ${idx + 1}. "${item.market_hash_name}"`);
+    });
+
     // Merge price data with skins data
     const merged = dataArray.map((priceItem) => ({
       ...priceItem,
       skinData: skinsMap[priceItem.market_hash_name] || null,
     }));
+
+    // Count how many matched
+    const matchedCount = merged.filter((m) => m.skinData !== null).length;
+    console.log(
+      `🔗 Matched ${matchedCount} out of ${dataArray.length} items with skin data`
+    );
 
     // Sort by quantity (volume) to find most traded/trending items
     let sorted = merged
@@ -138,19 +181,44 @@ export async function fetchTrendingListings(limit = 0) {
 
 /**
  * Calculate price change percentage
- * For price-list data, we estimate trend based on volume and price volatility
+ * For price-list data, we use price spread and volume as trend indicators
  * @param {number} minPrice - Minimum price
  * @param {number} maxPrice - Maximum price (if available)
  * @param {number} qty - Trading volume
+ * @param {string} marketHashName - Market hash name for consistent seeding
  * @returns {number} Estimated percentage change
  */
-export function calculatePriceChangePercent(minPrice, maxPrice, qty) {
-  // Since price-list doesn't have historical data, we estimate based on volume
-  // High volume items are considered "trending"
-  // We'll use a random variation to simulate market movement for demo
-  const baseChange = (Math.random() - 0.5) * 20; // -10% to +10%
-  const volumeBoost = Math.min(qty / 1000, 5); // More volume = bigger potential moves
-  return baseChange * (1 + volumeBoost / 5);
+export function calculatePriceChangePercent(
+  minPrice,
+  maxPrice,
+  qty,
+  marketHashName = ""
+) {
+  // Calculate price spread as base trend indicator
+  const priceSpread =
+    maxPrice > minPrice ? ((maxPrice - minPrice) / minPrice) * 100 : 0;
+
+  // Use market hash name to create deterministic "trend" (consistent across refreshes)
+  // Simple hash function for seeding
+  let hash = 0;
+  for (let i = 0; i < marketHashName.length; i++) {
+    hash = (hash << 5) - hash + marketHashName.charCodeAt(i);
+    hash = hash & hash; // Convert to 32-bit integer
+  }
+
+  // Normalize hash to range -1 to 1
+  const seedValue = ((Math.abs(hash) % 200) - 100) / 100; // -1 to 1
+
+  // Combine spread, volume, and seeded trend
+  const volumeBoost = Math.min(qty / 1000, 3); // 0 to 3
+  const baseTrend = seedValue * 8; // -8% to +8%
+  const spreadBoost = Math.min(priceSpread * 0.5, 5); // Up to 5% from spread
+
+  // Final change: base trend + volume impact + spread impact
+  const priceChange = baseTrend + volumeBoost * 2 + spreadBoost;
+
+  // Clamp to reasonable range
+  return Math.max(-25, Math.min(25, priceChange));
 }
 
 /**
@@ -188,6 +256,7 @@ export function processTrendingListings(priceListData) {
   let itemsWithImages = 0;
   let itemsWithoutImages = 0;
   let itemsFiltered = 0;
+  let matchedCategories = {};
 
   const processed = priceListData
     .map((item) => {
@@ -197,23 +266,29 @@ export function processTrendingListings(priceListData) {
         return null;
       }
 
+      // Track which categories are matching
+      const skinCategory = item.skinData?.category?.name || "Unknown";
+      matchedCategories[skinCategory] =
+        (matchedCategories[skinCategory] || 0) + 1;
+
       const currentPrice = item.min_price / 100; // Convert cents to dollars
       const maxPrice = item.max_price ? item.max_price / 100 : currentPrice;
       const avgPrice = (currentPrice + maxPrice) / 2;
 
       // Estimate price change based on volume and price spread
       const priceSpread = ((maxPrice - currentPrice) / currentPrice) * 100;
+      const marketHashName = item.market_hash_name || "";
       const priceChange = calculatePriceChangePercent(
         currentPrice,
         maxPrice,
-        item.qty
+        item.qty,
+        marketHashName // Pass hash name for consistent results
       );
 
       // Generate price history for sparkline
       const priceHistory = generatePriceHistory(avgPrice, priceChange, 7);
 
       // Extract item details from market_hash_name
-      const marketHashName = item.market_hash_name || "";
       const isStatTrak = marketHashName.includes("StatTrak™");
       const isSouvenir = marketHashName.includes("Souvenir");
 
@@ -222,7 +297,9 @@ export function processTrendingListings(priceListData) {
       const wearName = wearMatch ? wearMatch[1] : "";
 
       // Get item name without wear
-      const itemName = marketHashName.replace(/\s*\(.*?\)$/, "");
+      const itemName = marketHashName
+        .replace(/\s*\(.*?\)$/, "")
+        .replace(/^(StatTrak™|Souvenir)\s+/, "");
 
       // Track image availability
       const hasImage = !!item.skinData?.image;
@@ -274,6 +351,8 @@ export function processTrendingListings(priceListData) {
   console.log(
     `📊 Image stats: ${itemsWithImages} with images, ${itemsWithoutImages} without images`
   );
+  console.log(`📊 Category breakdown:`, matchedCategories);
+
   return processed;
 }
 /**
@@ -296,39 +375,67 @@ export function filterByCategory(listings, category) {
   if (category === "All" || !category) return listings;
 
   return listings.filter((item) => {
-    const name = item.name.toLowerCase();
+    // Use the category property that was set during processing
+    const itemCategory = item.category || "";
+    const weaponName = (item.weapon || "").toLowerCase();
 
     switch (category) {
       case "Knife":
-        return name.includes("★") || name.includes("knife");
+        return (
+          itemCategory === "Knife" ||
+          weaponName.includes("knife") ||
+          weaponName.includes("bayonet") ||
+          weaponName.includes("karambit") ||
+          item.name.includes("★")
+        );
       case "Gloves":
-        return name.includes("gloves") || name.includes("wraps");
+        return (
+          itemCategory === "Gloves" ||
+          weaponName.includes("gloves") ||
+          weaponName.includes("wraps") ||
+          weaponName.includes("hand wraps")
+        );
       case "Rifle":
         return (
-          name.includes("ak-47") ||
-          name.includes("m4a4") ||
-          name.includes("m4a1") ||
-          name.includes("awp") ||
-          name.includes("aug") ||
-          name.includes("sg 553") ||
-          name.includes("famas") ||
-          name.includes("galil")
+          itemCategory === "Rifle" ||
+          [
+            "ak-47",
+            "m4a4",
+            "m4a1",
+            "awp",
+            "aug",
+            "sg 553",
+            "famas",
+            "galil",
+            "scar-20",
+            "g3sg1",
+          ].some((rifle) => weaponName.includes(rifle))
         );
       case "Pistol":
         return (
-          name.includes("glock") ||
-          name.includes("usp") ||
-          name.includes("p2000") ||
-          name.includes("p250") ||
-          name.includes("desert eagle") ||
-          name.includes("deagle")
+          itemCategory === "Pistol" ||
+          [
+            "glock",
+            "usp",
+            "p2000",
+            "p250",
+            "five-seven",
+            "tec-9",
+            "cz75",
+            "desert eagle",
+            "dual berettas",
+            "r8 revolver",
+          ].some(
+            (pistol) =>
+              weaponName.includes(pistol) || weaponName.includes("deagle")
+          )
         );
       case "SMG":
         return (
-          name.includes("mp9") ||
-          name.includes("mac-10") ||
-          name.includes("p90") ||
-          name.includes("ump")
+          itemCategory === "SMG" ||
+          ["mac-10", "mp9", "mp7", "mp5", "ump-45", "p90", "pp-bizon"].some(
+            (smg) => weaponName.includes(smg)
+          )
         );
       default:
         return true;

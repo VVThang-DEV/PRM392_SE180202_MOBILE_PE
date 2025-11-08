@@ -47,7 +47,7 @@ export async function fetchPriceData() {
 /**
  * Get price for a specific skin
  * @param {Object} priceData - Full price data from fetchPriceData
- * @param {string} skinName - Full skin name (e.g., "AK-47 | Case Hardened")
+ * @param {string} skinName - Full skin name (e.g., "AK-47 | Case Hardened" or "★ Bayonet | Doppler")
  * @param {string} wear - Wear condition (e.g., "Factory New", "Minimal Wear")
  * @param {boolean} stattrak - Whether it's StatTrak™
  * @param {boolean} souvenir - Whether it's Souvenir
@@ -62,8 +62,11 @@ export function getSkinPrice(
 ) {
   if (!priceData || !skinName) return null;
 
+  // Remove ★ prefix for knives (bymykel uses "★ Bayonet" but CSFloat uses "Bayonet")
+  let cleanName = skinName.replace(/^★\s+/, "");
+
   // Build market hash name (Steam format)
-  let marketHashName = skinName;
+  let marketHashName = cleanName;
 
   if (stattrak) {
     marketHashName = `StatTrak™ ${marketHashName}`;
@@ -106,19 +109,11 @@ export function getSkinPrice(
         souvenir
       );
       if (result) {
-        console.log(`Found price with ${wearCondition} wear`);
         return result;
       }
     }
   }
 
-  console.log(`No price data for: ${marketHashName}`);
-  console.log(
-    `Available keys sample:`,
-    Object.keys(priceData)
-      .filter((k) => k.includes(skinName.split("|")[0]?.trim() || ""))
-      .slice(0, 3)
-  );
   return null;
 }
 
