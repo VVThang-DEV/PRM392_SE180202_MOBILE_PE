@@ -1,7 +1,5 @@
 # CS:GO Skins Mobile App
 
-**SE1720 - Vo Viet Thang - SE180202**
-
 A React Native mobile app for browsing CS:GO weapon skins with offline support, favorites, and live price tracking.
 
 ## What It Does
