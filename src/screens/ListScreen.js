@@ -132,7 +132,7 @@ export const ListScreen = ({ navigation }) => {
     return (
       <View style={styles.centerContainer}>
         <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={styles.loadingText}>Loading CS:GO Skins...</Text>
+        <Text style={styles.loadingText}>Loading CS2 Skins...</Text>
         <Text style={styles.loadingSubtext}>Fetching from API...</Text>
       </View>
     );

@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
   StyleSheet,
   Dimensions,
   ActivityIndicator,
+  TouchableOpacity,
+  ScrollView,
+  Switch,
 } from "react-native";
 import { LineChart } from "react-native-gifted-charts";
 import { LinearGradient } from "expo-linear-gradient";
@@ -20,29 +23,75 @@ import { formatPrice } from "../services/priceService";
 
 const { width } = Dimensions.get("window");
 
-export const PriceChart = ({ marketHashName, currentPrice }) => {
+// Wear condition mappings
+const WEAR_CONDITIONS = [
+  { key: "FN", label: "Factory New", suffix: "(Factory New)" },
+  { key: "MW", label: "Minimal Wear", suffix: "(Minimal Wear)" },
+  { key: "FT", label: "Field-Tested", suffix: "(Field-Tested)" },
+  { key: "WW", label: "Well-Worn", suffix: "(Well-Worn)" },
+  { key: "BS", label: "Battle-Scarred", suffix: "(Battle-Scarred)" },
+];
+
+export const PriceChart = ({ marketHashName, currentPrice, item }) => {
   const [priceHistory, setPriceHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState("7d"); // 7d, 14d, 30d
+  const [selectedWear, setSelectedWear] = useState(null);
+  const [isStatTrak, setIsStatTrak] = useState(false);
+  const [chartWidth, setChartWidth] = useState(1);
+  const [displayPrice, setDisplayPrice] = useState(currentPrice);
+  const scrollViewRef = useRef(null);
+
+  // Determine available wears from item data
+  const availableWears =
+    item?.availableWears || item?.wears?.map((w) => w.name) || [];
+  const hasStatTrak = item?.stattrak !== undefined;
 
   useEffect(() => {
     loadPriceHistory();
-  }, [marketHashName, period]);
+  }, [marketHashName, period, selectedWear, isStatTrak]);
 
   const loadPriceHistory = async () => {
     try {
       setLoading(true);
 
+      // Build market hash name with wear and StatTrak
+      let queryName = marketHashName;
+
+      // Add StatTrak prefix if enabled
+      if (isStatTrak && !queryName.includes("StatTrak™")) {
+        queryName = `StatTrak™ ${queryName}`;
+      } else if (!isStatTrak && queryName.includes("StatTrak™")) {
+        queryName = queryName.replace("StatTrak™ ", "");
+      }
+
+      // Replace wear condition if selected
+      if (selectedWear) {
+        // Remove existing wear condition
+        WEAR_CONDITIONS.forEach((wear) => {
+          queryName = queryName.replace(` ${wear.suffix}`, "");
+        });
+        // Add selected wear condition
+        const wearSuffix = WEAR_CONDITIONS.find(
+          (w) => w.key === selectedWear
+        )?.suffix;
+        if (wearSuffix && !queryName.includes(wearSuffix)) {
+          queryName = `${queryName} ${wearSuffix}`;
+        }
+      }
+
+      console.log(`Loading price history for: ${queryName}`);
+
       // Try Supabase first (centralized cloud history)
       let history = [];
       try {
         console.log("Attempting to load price history from Supabase...");
-        history = await getSkinPriceHistoryFromSupabase(marketHashName);
+        history = await getSkinPriceHistoryFromSupabase(queryName);
         console.log(`✅ Loaded ${history.length} points from Supabase`);
       } catch (supabaseError) {
         console.warn("⚠️ Supabase unavailable, falling back to local storage");
         // Fallback to local storage if Supabase fails
-        history = await getSkinPriceHistory(marketHashName);
+        history = await getSkinPriceHistory(queryName);
         console.log(`Loaded ${history.length} points from local storage`);
       }
 
@@ -59,9 +108,33 @@ export const PriceChart = ({ marketHashName, currentPrice }) => {
       );
 
       console.log(
-        `Displaying ${filtered.length} REAL price points for period ${period}`
+        `Displaying ${filtered.length} price points for ${queryName} (period: ${period})`
       );
+
+      // Adjust chart width based on data points for better zoom
+      const dataPoints = filtered.length;
+      const minWidth = width - SPACING.xl * 4 - 40;
+      // Improved zoom: more aggressive scaling for better visibility
+      let zoomFactor = 1;
+      if (dataPoints > 50) {
+        zoomFactor = 3.5;
+      } else if (dataPoints > 30) {
+        zoomFactor = 2.8;
+      } else if (dataPoints > 15) {
+        zoomFactor = 2.2;
+      } else if (dataPoints > 7) {
+        zoomFactor = 1.5;
+      }
+      setChartWidth(minWidth * zoomFactor);
+
       setPriceHistory(filtered);
+
+      // Update display price based on latest data point
+      if (filtered.length > 0) {
+        setDisplayPrice(filtered[filtered.length - 1].price);
+      } else {
+        setDisplayPrice(currentPrice);
+      }
     } catch (error) {
       console.error("Error loading price history:", error);
     } finally {
@@ -129,37 +202,140 @@ export const PriceChart = ({ marketHashName, currentPrice }) => {
 
   return (
     <View style={styles.container}>
+      {/* Wear Condition Selector */}
+      {availableWears.length > 0 && (
+        <View style={styles.wearSelectorContainer}>
+          <Text style={styles.selectorLabel}>Wear Condition:</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.wearScroll}
+          >
+            <TouchableOpacity
+              style={[
+                styles.wearButton,
+                !selectedWear && styles.wearButtonActive,
+              ]}
+              onPress={() => setSelectedWear(null)}
+            >
+              <Text
+                style={[
+                  styles.wearButtonText,
+                  !selectedWear && styles.wearButtonTextActive,
+                ]}
+              >
+                Default
+              </Text>
+            </TouchableOpacity>
+            {WEAR_CONDITIONS.map((wear) => {
+              const isAvailable = availableWears.some(
+                (w) => w.includes(wear.label) || w.includes(wear.key)
+              );
+              if (!isAvailable) return null;
+
+              return (
+                <TouchableOpacity
+                  key={wear.key}
+                  style={[
+                    styles.wearButton,
+                    selectedWear === wear.key && styles.wearButtonActive,
+                  ]}
+                  onPress={() => setSelectedWear(wear.key)}
+                >
+                  <Text
+                    style={[
+                      styles.wearButtonText,
+                      selectedWear === wear.key && styles.wearButtonTextActive,
+                    ]}
+                  >
+                    {wear.key}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* StatTrak Toggle */}
+      {hasStatTrak && (
+        <View style={styles.statTrakContainer}>
+          <Ionicons
+            name="stats-chart"
+            size={18}
+            color={isStatTrak ? COLORS.primary : COLORS.textMuted}
+          />
+          <Text style={styles.statTrakLabel}>StatTrak™</Text>
+          <Switch
+            value={isStatTrak}
+            onValueChange={setIsStatTrak}
+            trackColor={{ false: COLORS.border, true: COLORS.primary + "60" }}
+            thumbColor={isStatTrak ? COLORS.primary : COLORS.textMuted}
+          />
+        </View>
+      )}
+
       {/* Price Change Header */}
       <View style={styles.header}>
         <View style={styles.priceInfo}>
           <Text style={styles.currentPrice}>
-            {formatPrice(currentPrice || stats.current)}
+            {formatPrice(displayPrice || currentPrice || 0)}
           </Text>
-          <View
-            style={[styles.changeBadge, { backgroundColor: lineColor + "20" }]}
-          >
-            <Ionicons
-              name={
-                priceChange.trend === "up"
-                  ? "trending-up"
-                  : priceChange.trend === "down"
-                  ? "trending-down"
-                  : "remove"
-              }
-              size={16}
-              color={lineColor}
-            />
-            <Text style={[styles.changeText, { color: lineColor }]}>
-              {priceChange.percentage >= 0 ? "+" : ""}
-              {priceChange.percentage.toFixed(2)}%
-            </Text>
-          </View>
+          {priceHistory.length >= 2 && (
+            <View
+              style={[
+                styles.changeBadge,
+                {
+                  backgroundColor:
+                    (calculatePriceChange(priceHistory).trend === "up"
+                      ? "#10b981"
+                      : calculatePriceChange(priceHistory).trend === "down"
+                      ? "#ef4444"
+                      : COLORS.primary) + "20",
+                },
+              ]}
+            >
+              <Ionicons
+                name={
+                  calculatePriceChange(priceHistory).trend === "up"
+                    ? "trending-up"
+                    : calculatePriceChange(priceHistory).trend === "down"
+                    ? "trending-down"
+                    : "remove"
+                }
+                size={16}
+                color={
+                  calculatePriceChange(priceHistory).trend === "up"
+                    ? "#10b981"
+                    : calculatePriceChange(priceHistory).trend === "down"
+                    ? "#ef4444"
+                    : COLORS.primary
+                }
+              />
+              <Text
+                style={[
+                  styles.changeText,
+                  {
+                    color:
+                      calculatePriceChange(priceHistory).trend === "up"
+                        ? "#10b981"
+                        : calculatePriceChange(priceHistory).trend === "down"
+                        ? "#ef4444"
+                        : COLORS.primary,
+                  },
+                ]}
+              >
+                {calculatePriceChange(priceHistory).percentage >= 0 ? "+" : ""}
+                {calculatePriceChange(priceHistory).percentage.toFixed(2)}%
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Period Selector */}
         <View style={styles.periodSelector}>
           {["7d", "14d", "30d"].map((p) => (
-            <Text
+            <TouchableOpacity
               key={p}
               style={[
                 styles.periodButton,
@@ -167,69 +343,132 @@ export const PriceChart = ({ marketHashName, currentPrice }) => {
               ]}
               onPress={() => setPeriod(p)}
             >
-              {p}
-            </Text>
+              <Text
+                style={[
+                  styles.periodButtonText,
+                  period === p && styles.periodButtonTextActive,
+                ]}
+              >
+                {p}
+              </Text>
+            </TouchableOpacity>
           ))}
         </View>
       </View>
 
-      {/* Chart */}
-      <View style={styles.chartContainer}>
-        <LineChart
-          data={chartData}
-          width={width - SPACING.xl * 4 - 40}
-          height={180}
-          color={lineColor}
-          thickness={2.5}
-          startFillColor={lineColor}
-          endFillColor={lineColor}
-          startOpacity={0.4}
-          endOpacity={0.1}
-          initialSpacing={10}
-          endSpacing={10}
-          spacing={priceHistory.length > 15 ? 30 : 40}
-          noOfSections={4}
-          yAxisColor={COLORS.border}
-          xAxisColor={COLORS.border}
-          yAxisTextStyle={{ color: COLORS.textMuted, fontSize: 9 }}
-          yAxisOffset={stats.min * 0.95}
-          hideDataPoints={priceHistory.length > 10}
-          dataPointsColor={lineColor}
-          dataPointsRadius={3}
-          curved
-          isAnimated
-          animationDuration={800}
-          areaChart
-          hideRules
-          adjustToWidth
-        />
-      </View>
+      {/* Chart with Horizontal Scroll for Zoom */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={true}
+        ref={scrollViewRef}
+        style={styles.chartScrollContainer}
+        contentContainerStyle={styles.chartScrollContent}
+      >
+        <View style={[styles.chartContainer, { width: chartWidth }]}>
+          {priceHistory.length >= 2 ? (
+            <LineChart
+              data={priceHistory.map((item, index) => ({
+                value: item.price,
+                label:
+                  index % Math.ceil(priceHistory.length / 5) === 0
+                    ? new Date(item.date).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                      })
+                    : "",
+                labelTextStyle: { color: COLORS.textMuted, fontSize: 10 },
+              }))}
+              width={chartWidth}
+              height={200}
+              color={
+                calculatePriceChange(priceHistory).trend === "up"
+                  ? "#10b981"
+                  : calculatePriceChange(priceHistory).trend === "down"
+                  ? "#ef4444"
+                  : COLORS.primary
+              }
+              thickness={2.5}
+              startFillColor={
+                calculatePriceChange(priceHistory).trend === "up"
+                  ? "#10b981"
+                  : calculatePriceChange(priceHistory).trend === "down"
+                  ? "#ef4444"
+                  : COLORS.primary
+              }
+              endFillColor={
+                calculatePriceChange(priceHistory).trend === "up"
+                  ? "#10b981"
+                  : calculatePriceChange(priceHistory).trend === "down"
+                  ? "#ef4444"
+                  : COLORS.primary
+              }
+              startOpacity={0.4}
+              endOpacity={0.1}
+              initialSpacing={15}
+              endSpacing={15}
+              spacing={Math.max(20, chartWidth / priceHistory.length)}
+              noOfSections={5}
+              yAxisColor={COLORS.border}
+              xAxisColor={COLORS.border}
+              yAxisTextStyle={{ color: COLORS.textMuted, fontSize: 9 }}
+              yAxisOffset={getPriceStats(priceHistory).min * 0.95}
+              hideDataPoints={priceHistory.length > 20}
+              dataPointsColor={
+                calculatePriceChange(priceHistory).trend === "up"
+                  ? "#10b981"
+                  : calculatePriceChange(priceHistory).trend === "down"
+                  ? "#ef4444"
+                  : COLORS.primary
+              }
+              dataPointsRadius={3}
+              curved
+              isAnimated
+              animationDuration={800}
+              areaChart
+              hideRules={false}
+              rulesColor={COLORS.border + "20"}
+              rulesType="solid"
+            />
+          ) : null}
+        </View>
+      </ScrollView>
 
       {/* Stats */}
-      <View style={styles.statsContainer}>
-        <View style={styles.statItem}>
-          <Text style={styles.statLabel}>Min</Text>
-          <Text style={styles.statValue}>{formatPrice(stats.min)}</Text>
+      {priceHistory.length >= 2 && (
+        <View style={styles.statsContainer}>
+          <View style={styles.statItem}>
+            <Text style={styles.statLabel}>Min</Text>
+            <Text style={styles.statValue}>
+              {formatPrice(getPriceStats(priceHistory).min)}
+            </Text>
+          </View>
+          <View style={styles.statDivider} />
+          <View style={styles.statItem}>
+            <Text style={styles.statLabel}>Avg</Text>
+            <Text style={styles.statValue}>
+              {formatPrice(getPriceStats(priceHistory).avg)}
+            </Text>
+          </View>
+          <View style={styles.statDivider} />
+          <View style={styles.statItem}>
+            <Text style={styles.statLabel}>Max</Text>
+            <Text style={styles.statValue}>
+              {formatPrice(getPriceStats(priceHistory).max)}
+            </Text>
+          </View>
         </View>
-        <View style={styles.statDivider} />
-        <View style={styles.statItem}>
-          <Text style={styles.statLabel}>Avg</Text>
-          <Text style={styles.statValue}>{formatPrice(stats.avg)}</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.statItem}>
-          <Text style={styles.statLabel}>Max</Text>
-          <Text style={styles.statValue}>{formatPrice(stats.max)}</Text>
-        </View>
-      </View>
+      )}
 
       {/* Real Data Notice */}
-      <View style={styles.noticeContainer}>
-        <Ionicons name="checkmark-circle-outline" size={14} color="#10b981" />
-        <Text style={[styles.noticeText, { color: "#10b981" }]}>
-          Real-time price data • {priceHistory.length} data points tracked
-        </Text>
-      </View>
+      {priceHistory.length >= 2 && (
+        <View style={styles.noticeContainer}>
+          <Ionicons name="checkmark-circle-outline" size={14} color="#10b981" />
+          <Text style={[styles.noticeText, { color: "#10b981" }]}>
+            Real-time price data • {priceHistory.length} data points tracked
+          </Text>
+          <Text style={styles.zoomHint}>← Swipe to zoom chart →</Text>
+        </View>
+      )}
     </View>
   );
 };
@@ -240,6 +479,55 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.lg,
     padding: SPACING.lg,
     marginVertical: SPACING.md,
+  },
+  wearSelectorContainer: {
+    marginBottom: SPACING.md,
+  },
+  selectorLabel: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.textMuted,
+    marginBottom: SPACING.sm,
+    fontWeight: "600",
+  },
+  wearScroll: {
+    gap: SPACING.xs,
+  },
+  wearButton: {
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  wearButtonActive: {
+    backgroundColor: COLORS.primary + "20",
+    borderColor: COLORS.primary,
+  },
+  wearButtonText: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.textMuted,
+    fontWeight: "600",
+    fontSize: 11,
+  },
+  wearButtonTextActive: {
+    color: COLORS.primary,
+    fontWeight: "700",
+  },
+  statTrakContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.sm,
+    marginBottom: SPACING.md,
+    padding: SPACING.md,
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  statTrakLabel: {
+    ...TYPOGRAPHY.body,
+    color: COLORS.text,
+    flex: 1,
+    fontWeight: "600",
   },
   header: {
     marginBottom: SPACING.lg,
@@ -273,23 +561,37 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
   },
   periodButton: {
-    ...TYPOGRAPHY.caption,
-    color: COLORS.textMuted,
+    flex: 1,
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.xs,
+    paddingVertical: SPACING.sm,
     borderRadius: BORDER_RADIUS.md,
     backgroundColor: COLORS.surface,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   periodButtonActive: {
-    color: COLORS.primary,
     backgroundColor: COLORS.primary + "20",
+    borderColor: COLORS.primary,
+  },
+  periodButtonText: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.textMuted,
+    fontWeight: "600",
+  },
+  periodButtonTextActive: {
+    color: COLORS.primary,
     fontWeight: "700",
   },
-  chartContainer: {
+  chartScrollContainer: {
     marginVertical: SPACING.md,
+  },
+  chartScrollContent: {
+    paddingRight: SPACING.lg,
+  },
+  chartContainer: {
     alignItems: "center",
-    overflow: "hidden",
-    width: "100%",
+    justifyContent: "center",
   },
   statsContainer: {
     flexDirection: "row",
@@ -332,9 +634,7 @@ const styles = StyleSheet.create({
     marginTop: SPACING.md,
   },
   noticeContainer: {
-    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
     gap: SPACING.xs,
     marginTop: SPACING.md,
     paddingTop: SPACING.md,
@@ -346,6 +646,13 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     fontSize: 11,
     fontStyle: "italic",
+  },
+  zoomHint: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.textMuted,
+    fontSize: 10,
+    fontStyle: "italic",
+    marginTop: SPACING.xs,
   },
   noDataSubtext: {
     ...TYPOGRAPHY.caption,

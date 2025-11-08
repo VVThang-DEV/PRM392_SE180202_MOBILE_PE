@@ -2,7 +2,8 @@
  * Price Service - Fetch live CS:GO skin prices from CSGOFloat API
  */
 
-const CSFLOAT_API_KEY = "ibj-zt1c2f7gSB5lLLtZqyuWdRW7c1kt";
+import { CSFLOAT_API_KEY } from "@env";
+
 const CSFLOAT_PRICE_API = "https://csfloat.com/api/v1/listings/price-list";
 
 /**

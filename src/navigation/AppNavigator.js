@@ -7,8 +7,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { ListScreen } from "../screens/ListScreen";
 import { DetailScreen } from "../screens/DetailScreen";
 import { FavoritesScreen } from "../screens/FavoritesScreen";
+import { TrendsScreen } from "../screens/TrendsScreen";
 import { WearConditionScreen } from "../screens/WearConditionScreen";
 import { PatternSeedScreen } from "../screens/PatternSeedScreen";
+import { ProfileScreen } from "../screens/ProfileScreen";
+import { InventoryScreen } from "../screens/InventoryScreen";
 import { COLORS } from "../constants/theme";
 
 const Stack = createNativeStackNavigator();
@@ -36,7 +39,61 @@ const ListStack = () => {
         name="ListHome"
         component={ListScreen}
         options={{
-          title: "SE1720 - Vo Viet Thang - SE180202",
+          title: "CS2 Market Tracker",
+          headerLargeTitle: false,
+        }}
+      />
+      <Stack.Screen
+        name="Detail"
+        component={DetailScreen}
+        options={{
+          title: "Skin Details",
+          headerBackTitle: "Back",
+        }}
+      />
+      <Stack.Screen
+        name="WearCondition"
+        component={WearConditionScreen}
+        options={{
+          title: "Wear Conditions",
+          headerBackTitle: "Back",
+        }}
+      />
+      <Stack.Screen
+        name="PatternSeed"
+        component={PatternSeedScreen}
+        options={{
+          title: "Pattern Seeds",
+          headerBackTitle: "Back",
+        }}
+      />
+    </Stack.Navigator>
+  );
+};
+
+// Stack navigator for the Trends flow
+const TrendsStack = () => {
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerStyle: {
+          backgroundColor: COLORS.surface,
+        },
+        headerTintColor: COLORS.text,
+        headerTitleStyle: {
+          fontWeight: "600",
+        },
+        headerShadowVisible: false,
+        contentStyle: {
+          backgroundColor: COLORS.background,
+        },
+      }}
+    >
+      <Stack.Screen
+        name="TrendsHome"
+        component={TrendsScreen}
+        options={{
+          title: "Market Trends",
           headerLargeTitle: false,
         }}
       />
@@ -122,6 +179,44 @@ const FavoritesStack = () => {
   );
 };
 
+// Stack navigator for the Profile flow
+const ProfileStack = () => {
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerStyle: {
+          backgroundColor: COLORS.surface,
+        },
+        headerTintColor: COLORS.text,
+        headerTitleStyle: {
+          fontWeight: "600",
+        },
+        headerShadowVisible: false,
+        contentStyle: {
+          backgroundColor: COLORS.background,
+        },
+      }}
+    >
+      <Stack.Screen
+        name="ProfileHome"
+        component={ProfileScreen}
+        options={{
+          title: "Profile",
+          headerLargeTitle: false,
+        }}
+      />
+      <Stack.Screen
+        name="Inventory"
+        component={InventoryScreen}
+        options={{
+          title: "My Inventory",
+          headerBackTitle: "Back",
+        }}
+      />
+    </Stack.Navigator>
+  );
+};
+
 // Bottom tab navigator
 const TabNavigator = () => {
   return (
@@ -134,6 +229,10 @@ const TabNavigator = () => {
             iconName = focused ? "grid" : "grid-outline";
           } else if (route.name === "Favorites") {
             iconName = focused ? "star" : "star-outline";
+          } else if (route.name === "Trends") {
+            iconName = focused ? "trending-up" : "trending-up-outline";
+          } else if (route.name === "Profile") {
+            iconName = focused ? "person" : "person-outline";
           }
 
           return <Ionicons name={iconName} size={size} color={color} />;
@@ -165,10 +264,24 @@ const TabNavigator = () => {
         }}
       />
       <Tab.Screen
+        name="Trends"
+        component={TrendsStack}
+        options={{
+          title: "Trends",
+        }}
+      />
+      <Tab.Screen
         name="Favorites"
         component={FavoritesStack}
         options={{
           title: "Favorites",
+        }}
+      />
+      <Tab.Screen
+        name="Profile"
+        component={ProfileStack}
+        options={{
+          title: "Profile",
         }}
       />
     </Tab.Navigator>

@@ -8,17 +8,24 @@ import React, {
 } from "react";
 import { AppState, Platform } from "react-native";
 import NetInfo from "@react-native-community/netinfo";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { initDatabase } from "../database/schema";
 import {
-  getItems,
-  saveItems,
-  getFavorites,
-  saveFavorites,
-} from "../database/storage";
-import { clearAllStorage, getStorageInfo } from "../database/storageCleanup";
+  getAllItems,
+  insertItems,
+  toggleFavorite as toggleFavoriteDB,
+  isDatabaseEmpty,
+  searchItems,
+  savePriceData,
+  getPriceData,
+  savePriceHistory,
+  getPriceHistory,
+  setMetadata,
+  getMetadata,
+  cleanOldPriceHistory,
+} from "../database/operations";
+import { migrateFromAsyncStorage } from "../database/migration";
 import { fetchSkinsFromAPI, determineCategory } from "../services/apiService";
 import { fetchPriceData } from "../services/priceService";
-import { savePriceSnapshot } from "../services/priceHistoryService";
 import {
   savePriceSnapshotToSupabase,
   isSupabaseConfigured,
@@ -42,55 +49,44 @@ export const DataProvider = ({ children }) => {
   const [priceData, setPriceData] = useState(null);
   const [lastPriceUpdate, setLastPriceUpdate] = useState(null);
   const [isConnected, setIsConnected] = useState(true);
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
+  const [dbInitialized, setDbInitialized] = useState(false);
   const priceUpdateInterval = useRef(null);
   const appState = useRef(AppState.currentState);
 
-  // Always clear storage on first app open for clean experience
-  const checkAppVersion = useCallback(async () => {
-    try {
-      const currentVersion = "1.0.0"; // Update this when you bump version
-      const hasBeenInitialized = await AsyncStorage.getItem("@app_initialized");
-      const hasData = await AsyncStorage.getItem("@csgo_items");
-
-      // Clear storage if never initialized OR if initialized but no data (incomplete initialization)
-      if (!hasBeenInitialized || (hasBeenInitialized && !hasData)) {
-        console.log(
-          "🆕 First app run or incomplete initialization detected, clearing storage for clean start..."
-        );
-        await clearAllStorage();
-        // Set initialization flag AFTER clearing (so it doesn't get cleared too!)
-        await AsyncStorage.setItem("@app_initialized", "true");
-        await AsyncStorage.setItem("@app_version", currentVersion);
-        console.log("✅ Storage cleared and app initialized");
-      } else {
-        console.log(
-          "📱 App already properly initialized, keeping existing data"
-        );
-      }
-    } catch (error) {
-      console.error("Error initializing app:", error);
-      // On error, try to initialize anyway
+  // Initialize database on mount
+  useEffect(() => {
+    const initDB = async () => {
       try {
-        await clearAllStorage();
-        await AsyncStorage.setItem("@app_initialized", "true");
-        await AsyncStorage.setItem("@app_version", "1.0.0");
-        console.log("✅ Emergency initialization completed");
-      } catch (emergencyError) {
-        console.error("Emergency initialization failed:", emergencyError);
+        console.log("🔄 Initializing SQLite database...");
+        await initDatabase();
+        setDbInitialized(true);
+        console.log("✅ Database initialized successfully");
+
+        // Run migration from AsyncStorage (one-time for existing users)
+        const migrationResult = await migrateFromAsyncStorage();
+        if (migrationResult.migrated) {
+          console.log(
+            `✅ Migrated ${migrationResult.itemCount} items from AsyncStorage`
+          );
+        }
+      } catch (error) {
+        console.error("❌ Database initialization failed:", error);
+        setError("Failed to initialize database: " + error.message);
       }
-    }
+    };
+    initDB();
   }, []);
 
   // Monitor network connectivity
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
-      console.log(
-        "Network state:",
-        state.isConnected ? "Connected" : "Disconnected"
-      );
-      setIsConnected(state.isConnected);
+      const connected = state.isConnected;
+      console.log("Network state:", connected ? "Connected" : "Disconnected");
+      setIsConnected(connected);
+      setIsOfflineMode(!connected);
 
-      if (state.isConnected && error && error.includes("Network")) {
+      if (connected && error && error.includes("Network")) {
         console.log("Network reconnected, retrying data load...");
         loadData();
       }
@@ -99,28 +95,32 @@ export const DataProvider = ({ children }) => {
     return () => unsubscribe();
   }, [error]);
 
-  // Load initial data
+  // Load initial data after database is initialized
   useEffect(() => {
-    const initializeApp = async () => {
-      await checkAppVersion(); // Wait for initialization to complete
+    if (dbInitialized) {
       loadData();
       loadPrices();
-    };
-    initializeApp();
-  }, [checkAppVersion]);
+    }
+  }, [dbInitialized]);
 
   // Set up real-time price updates with polling
   // NOTE: Price tracking only works while app is open/active
   // When app is closed or backgrounded for long periods, tracking pauses
   // This is normal React Native behavior - background tasks require special setup
   useEffect(() => {
+    if (!dbInitialized) return;
+
     // Initial price load
     loadPrices();
 
     // Set up polling interval for price updates (every 30 minutes)
     priceUpdateInterval.current = setInterval(() => {
-      console.log("Auto-refreshing prices (app is active)...");
-      loadPrices();
+      if (isConnected) {
+        console.log("Auto-refreshing prices (app is active)...");
+        loadPrices();
+      } else {
+        console.log("Offline mode - skipping price refresh");
+      }
     }, 30 * 60 * 1000); // 30 minutes
 
     // Handle app state changes
@@ -132,8 +132,10 @@ export const DataProvider = ({ children }) => {
         nextAppState === "active"
       ) {
         // App came to foreground, refresh prices to catch up
-        console.log("App became active, refreshing prices to catch up");
-        loadPrices();
+        if (isConnected) {
+          console.log("App became active, refreshing prices to catch up");
+          loadPrices();
+        }
       } else if (nextAppState.match(/inactive|background/)) {
         // App going to background
         console.log("App going to background, price tracking will pause");
@@ -150,18 +152,39 @@ export const DataProvider = ({ children }) => {
       }
       subscription?.remove();
     };
-  }, []);
+  }, [dbInitialized, isConnected]);
 
-  // Load prices from CSGOFloat with history tracking (local + Supabase cloud)
+  // Load prices from CSGOFloat with history tracking (local SQLite + Supabase cloud)
   const loadPrices = async () => {
     try {
+      if (!isConnected) {
+        console.log("📴 Offline mode - loading prices from SQLite cache...");
+        const cachedPrices = await getPriceData();
+        if (cachedPrices && Object.keys(cachedPrices).length > 0) {
+          setPriceData(cachedPrices);
+          const lastUpdate = await getMetadata("lastPriceUpdate");
+          setLastPriceUpdate(lastUpdate || null);
+          console.log("✅ Loaded cached prices from SQLite");
+        } else {
+          console.log("⚠️ No cached prices available offline");
+        }
+        return;
+      }
+
+      // Online mode - fetch fresh prices
       const prices = await fetchPriceData();
       if (prices) {
         setPriceData(prices);
-        setLastPriceUpdate(Date.now());
+        const timestamp = Date.now();
+        setLastPriceUpdate(timestamp);
 
-        // Save snapshot to LOCAL storage (fast, always works)
-        await savePriceSnapshot(prices);
+        // Save to SQLite for offline access
+        await savePriceData(prices);
+        await savePriceHistory(prices);
+        await setMetadata("lastPriceUpdate", timestamp);
+
+        // Clean old history (keep 30 days)
+        await cleanOldPriceHistory(30);
 
         // Save to Supabase (centralized cloud storage)
         if (isSupabaseConfigured()) {
@@ -172,16 +195,22 @@ export const DataProvider = ({ children }) => {
             console.error("❌ Supabase error:", supabaseError.message);
             console.warn("⚠️ Using local storage as fallback");
           }
-        } else {
-          console.warn(
-            "⚠️ Supabase not configured - add your anon key to supabaseService.js"
-          );
         }
 
-        console.log("Price data loaded and saved");
+        console.log("✅ Price data loaded and saved to SQLite");
       }
     } catch (err) {
       console.error("Failed to load price data:", err);
+      // Try to load from cache on error
+      try {
+        const cachedPrices = await getPriceData();
+        if (cachedPrices && Object.keys(cachedPrices).length > 0) {
+          setPriceData(cachedPrices);
+          console.log("⚠️ Using cached prices due to fetch error");
+        }
+      } catch (cacheError) {
+        console.error("Failed to load cached prices:", cacheError);
+      }
     }
   };
 
@@ -190,61 +219,58 @@ export const DataProvider = ({ children }) => {
       setIsLoading(true);
       setError(null);
 
-      console.log("Loading data from storage...");
+      console.log("📂 Loading data from SQLite database...");
 
-      // Load from storage
-      const [storedItems, storedFavorites] = await Promise.all([
-        getItems(),
-        getFavorites(),
-      ]);
+      // Load items from database
+      const dbItems = await getAllItems();
+      console.log(`Loaded ${dbItems.length} items from database`);
 
-      console.log(`Loaded ${storedItems.length} items from storage`);
-      setFavorites(storedFavorites);
+      // Build favorites map
+      const favMap = {};
+      dbItems.forEach((item) => {
+        if (item.isFavorite) {
+          favMap[item._id || item.id] = true;
+        }
+      });
+      setFavorites(favMap);
 
-      // If no items in storage, fetch from API
-      if (storedItems.length === 0) {
-        console.log("No cached data, fetching from API...");
+      // If no items in database, fetch from API
+      if (dbItems.length === 0) {
+        if (!isConnected) {
+          setError(
+            "No cached data available. Please connect to internet to download data."
+          );
+          setIsLoading(false);
+          return;
+        }
+        console.log("💾 No cached data, fetching from API...");
         await syncFromAPI();
       } else {
-        // Transform stored items to add convenience fields
-        const transformedItems = storedItems.map((item) => ({
-          ...item,
-          id: item.id || item._id,
-          weaponName: item.weaponName || item.weapon || "Unknown Weapon",
-          categoryName: item.categoryName || item.category || "Other",
-          rarityName: item.rarityName || item.rarity || "Common",
-          rarityColor: item.rarityColor || item.rarity_color || "#666666",
-          patternName: item.patternName || item.pattern || "",
-          availableWears:
-            item.availableWears || item.wears?.map((w) => w.name) || [],
-          stattrak: item.stattrak || false,
-          souvenir: item.souvenir || false,
-          crateNames: item.crateNames || item.crates?.map((c) => c.name) || [],
-          collectionNames:
-            item.collectionNames || item.collections?.map((c) => c.name) || [],
-        }));
-        setItems(transformedItems);
+        setItems(dbItems);
         setIsLoading(false);
-        console.log("Data loaded successfully!");
+        console.log("✅ Data loaded successfully from SQLite!");
+
+        // Sync in background if connected (non-blocking)
+        if (isConnected) {
+          const lastSync = await getMetadata("lastSync");
+          const hoursSinceSync = lastSync
+            ? (Date.now() - lastSync) / (1000 * 60 * 60)
+            : 999;
+
+          if (hoursSinceSync > 24) {
+            console.log("🔄 Background sync - data is older than 24 hours");
+            syncFromAPI().catch((err) =>
+              console.warn("Background sync failed:", err)
+            );
+          }
+        }
       }
     } catch (err) {
       console.error("Load data error:", err);
       const errorMessage =
         err.message ||
         "Could not load data. Please check your connection and try again.";
-
-      // Check if it's a SQLite/database full error
-      if (
-        errorMessage.includes("sqlite_full") ||
-        errorMessage.includes("database or disk is full")
-      ) {
-        console.warn("SQLite database full error detected");
-        setError(
-          "Storage is full. Tap 'Clear Storage' to free up space and reload data."
-        );
-      } else {
-        setError(errorMessage);
-      }
+      setError(errorMessage);
       setIsLoading(false);
     }
   };
@@ -261,7 +287,7 @@ export const DataProvider = ({ children }) => {
         );
       }
 
-      console.log("Syncing data from API...");
+      console.log("🌐 Syncing data from API...");
       const apiData = await fetchSkinsFromAPI();
 
       if (!apiData || apiData.length === 0) {
@@ -270,9 +296,8 @@ export const DataProvider = ({ children }) => {
 
       console.log(`Processing ${apiData.length} items from API...`);
 
-      // Process and save items
+      // Process items for database
       const processedItems = apiData.map((skin, index) => {
-        // determineCategory needs the weapon name string, not category object
         const weaponName = skin.weapon?.name || "";
         const category = weaponName
           ? determineCategory(weaponName)
@@ -285,8 +310,9 @@ export const DataProvider = ({ children }) => {
           console.log(`Processing skin ${index}:`, {
             name: skin.name,
             weaponName,
-            determinedCategory: category,
+            category,
             rarityName,
+            stattrak: skin.stattrak,
           });
         }
 
@@ -309,12 +335,10 @@ export const DataProvider = ({ children }) => {
           rarityColor: rarityColor,
           image: skin.image || "",
           team: skin.team?.name || "",
-          // Add wears data
           wears: skin.wears || [],
           availableWears: skin.wears?.map((w) => w.name) || [],
           stattrak: skin.stattrak || false,
           souvenir: skin.souvenir || false,
-          // Crates and collections
           crates: skin.crates || [],
           crateNames: skin.crates?.map((c) => c.name) || [],
           collections: skin.collections || [],
@@ -322,11 +346,18 @@ export const DataProvider = ({ children }) => {
         };
       });
 
-      await saveItems(processedItems);
-      setItems(processedItems);
+      // Save to SQLite database (preserves favorites via COALESCE in insertItems)
+      await insertItems(processedItems);
+      await setMetadata("lastSync", Date.now());
+
+      // Reload from database to get updated data
+      const updatedItems = await getAllItems();
+      setItems(updatedItems);
       setIsLoading(false);
 
-      console.log(`Successfully synced ${processedItems.length} items`);
+      console.log(
+        `✅ Successfully synced ${processedItems.length} items to SQLite`
+      );
       return processedItems.length;
     } catch (err) {
       console.error("Sync error:", err);
@@ -343,16 +374,29 @@ export const DataProvider = ({ children }) => {
   const toggleFavorite = useCallback(
     async (itemId) => {
       try {
+        const isFav = !!favorites[itemId];
+        const newIsFav = !isFav;
+
+        // Update database
+        await toggleFavoriteDB(itemId, newIsFav);
+
+        // Update local state
         const newFavorites = { ...favorites };
-
-        if (newFavorites[itemId]) {
-          delete newFavorites[itemId];
-        } else {
+        if (newIsFav) {
           newFavorites[itemId] = true;
+        } else {
+          delete newFavorites[itemId];
         }
-
-        await saveFavorites(newFavorites);
         setFavorites(newFavorites);
+
+        // Update item in items array
+        setItems((prevItems) =>
+          prevItems.map((item) =>
+            item.id === itemId || item._id === itemId
+              ? { ...item, isFavorite: newIsFav }
+              : item
+          )
+        );
       } catch (err) {
         console.error("Toggle favorite error:", err);
       }
@@ -361,7 +405,7 @@ export const DataProvider = ({ children }) => {
   );
 
   const getFavoriteItems = useCallback(() => {
-    return items.filter((item) => favorites[item._id]);
+    return items.filter((item) => favorites[item._id || item.id]);
   }, [items, favorites]);
 
   const retryLoadData = useCallback(async () => {
@@ -371,24 +415,12 @@ export const DataProvider = ({ children }) => {
 
   const clearStorageAndRetry = useCallback(async () => {
     try {
-      console.log("Storage error detected, clearing storage and retrying...");
-      setError("Clearing storage due to database error...");
-
-      // Get storage info before clearing
-      await getStorageInfo();
-
-      // Clear all storage
-      const cleared = await clearAllStorage();
-      if (cleared) {
-        console.log("Storage cleared, retrying data load...");
-        setError(null);
-        await loadData();
-      } else {
-        setError("Failed to clear storage. Please restart the app.");
-      }
+      console.log(
+        "⚠️ This will clear all local data. Please reconnect to internet to re-download."
+      );
+      setError("This feature requires migration to new storage system.");
     } catch (err) {
-      console.error("Error clearing storage:", err);
-      setError("Storage error: " + err.message);
+      console.error("Error:", err);
     }
   }, []);
 
@@ -400,6 +432,7 @@ export const DataProvider = ({ children }) => {
     priceData,
     lastPriceUpdate,
     isConnected,
+    isOfflineMode,
     syncFromAPI,
     toggleFavorite,
     getFavoriteItems,
@@ -407,6 +440,7 @@ export const DataProvider = ({ children }) => {
     retryLoadData,
     clearStorageAndRetry,
     isFavorite: (itemId) => !!favorites[itemId],
+    getPriceHistory, // Expose for price charts
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

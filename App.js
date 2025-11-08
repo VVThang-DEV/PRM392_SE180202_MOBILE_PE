@@ -5,6 +5,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Text, TextInput } from "react-native";
 import { AppNavigator } from "./src/navigation/AppNavigator";
 import { DataProvider } from "./src/context/DataContext";
+import { UserProvider } from "./src/context/UserContext";
 import { initSupabase } from "./src/services/supabaseService";
 
 // Fix for "Cannot read property 'regular' of undefined" error
@@ -23,10 +24,12 @@ export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <DataProvider>
-          <StatusBar style="light" />
-          <AppNavigator />
-        </DataProvider>
+        <UserProvider>
+          <DataProvider>
+            <StatusBar style="light" />
+            <AppNavigator />
+          </DataProvider>
+        </UserProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

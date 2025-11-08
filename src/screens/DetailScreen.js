@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   Dimensions,
+  Switch,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, {
@@ -42,11 +43,37 @@ export const DetailScreen = ({ route, navigation }) => {
   const isItemFavorite = isFavorite(itemId);
 
   const [showPriceDetails, setShowPriceDetails] = useState(false);
+  const [showStatTrak, setShowStatTrak] = useState(item?.stattrak || false);
 
-  // Calculate base price for the item
-  const basePrice = priceData
-    ? getSkinPrice(priceData, item?.name, null, item?.stattrak, item?.souvenir)
-    : null; // Debug price data
+  // Calculate prices for both versions
+  const normalPrice = priceData
+    ? getSkinPrice(priceData, item?.name, null, false, item?.souvenir)
+    : null;
+
+  const statTrakPrice = priceData
+    ? getSkinPrice(priceData, item?.name, null, true, item?.souvenir)
+    : null;
+
+  // Use selected version for display
+  const basePrice = showStatTrak ? statTrakPrice : normalPrice;
+
+  // Debug crates data
+  useEffect(() => {
+    console.log("=== DetailScreen Crates Debug ===");
+    console.log("Item name:", item?.name);
+    console.log("Crates array:", item?.crates);
+    console.log("Crates type:", typeof item?.crates);
+    console.log("Crates is array:", Array.isArray(item?.crates));
+    console.log("Crates length:", item?.crates?.length);
+    if (item?.crates && item.crates.length > 0) {
+      console.log("First crate:", item.crates[0]);
+      console.log("First crate type:", typeof item.crates[0]);
+    }
+    console.log("CrateNames:", item?.crateNames);
+    console.log("=================");
+  }, [item]);
+
+  // Debug price data
   useEffect(() => {
     console.log("=== DetailScreen Price Debug ===");
     console.log("Item name:", item?.name);
@@ -199,11 +226,30 @@ export const DetailScreen = ({ route, navigation }) => {
           </Text>
         )}
 
+        {/* StatTrak Toggle */}
+        {item.stattrak && (
+          <View style={styles.toggleContainer}>
+            <Text style={styles.toggleLabel}>Show StatTrak™ Price</Text>
+            <Switch
+              value={showStatTrak}
+              onValueChange={(value) => {
+                setShowStatTrak(value);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
+              trackColor={{ false: COLORS.border, true: COLORS.primary }}
+              thumbColor={
+                showStatTrak ? COLORS.primaryDark : COLORS.textSecondary
+              }
+            />
+          </View>
+        )}
+
         {/* Price Chart with History */}
         {basePrice && basePrice.marketHashName && (
           <PriceChart
             marketHashName={basePrice.marketHashName}
             currentPrice={basePrice.avg}
+            item={item}
           />
         )}
 
@@ -373,23 +419,40 @@ export const DetailScreen = ({ route, navigation }) => {
         </View>
 
         {/* Crates Section */}
-        {item.crateNames && item.crateNames.length > 0 && (
+        {((item.crateNames && item.crateNames.length > 0) ||
+          (item.crates && item.crates.length > 0)) && (
           <View style={styles.listSection}>
             <Text style={styles.sectionTitle}>
               <Ionicons name="cube-outline" size={18} color={COLORS.primary} />{" "}
               Available in Crates
             </Text>
-            <View style={styles.listContainer}>
-              {item.crateNames.map((crate, index) => (
-                <View key={index} style={styles.listItem}>
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={16}
-                    color={COLORS.primary}
-                  />
-                  <Text style={styles.listItemText}>{crate}</Text>
-                </View>
-              ))}
+            <View style={styles.cratesContainer}>
+              {(item.crates || item.crateNames || []).map((crate, index) => {
+                const crateName =
+                  typeof crate === "string" ? crate : crate?.name;
+                const crateImage =
+                  typeof crate === "object" && crate !== null
+                    ? crate.image
+                    : null;
+
+                return (
+                  <View key={index} style={styles.crateCard}>
+                    {crateImage && (
+                      <Image
+                        source={{ uri: crateImage }}
+                        style={styles.crateImage}
+                        resizeMode="contain"
+                      />
+                    )}
+                    <View style={styles.crateInfo}>
+                      <Ionicons name="cube" size={16} color={COLORS.primary} />
+                      <Text style={styles.crateText} numberOfLines={2}>
+                        {crateName}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
             </View>
           </View>
         )}
@@ -688,6 +751,36 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
   },
+  cratesContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: SPACING.md,
+  },
+  crateCard: {
+    width: "47%",
+    backgroundColor: COLORS.card,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    overflow: "hidden",
+  },
+  crateImage: {
+    width: "100%",
+    height: 100,
+    backgroundColor: COLORS.surface,
+  },
+  crateInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: SPACING.md,
+    gap: SPACING.sm,
+  },
+  crateText: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.text,
+    flex: 1,
+    fontWeight: "600",
+  },
   listContainer: {
     backgroundColor: COLORS.card,
     borderRadius: BORDER_RADIUS.lg,
@@ -707,6 +800,22 @@ const styles = StyleSheet.create({
     ...TYPOGRAPHY.body,
     color: COLORS.text,
     flex: 1,
+  },
+  toggleContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: COLORS.card,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  toggleLabel: {
+    ...TYPOGRAPHY.body,
+    fontWeight: "600",
+    color: COLORS.text,
   },
   priceToggleButton: {
     backgroundColor: COLORS.card,

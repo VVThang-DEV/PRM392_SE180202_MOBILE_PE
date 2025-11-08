@@ -2,7 +2,7 @@
  * Service for fetching seed-specific skin images from CSGOFloat API
  */
 
-const CSFLOAT_API_KEY = "ibj-zt1c2f7gSB5lLLtZqyuWdRW7c1kt";
+import { CSFLOAT_API_KEY } from "@env";
 
 /**
  * Fetch seed-specific image from CSGOFloat API
